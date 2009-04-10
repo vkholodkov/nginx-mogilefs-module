@@ -28,8 +28,8 @@ static void ngx_http_mogilefs_finalize_request(ngx_http_request_t *r, ngx_int_t 
 static ngx_int_t ngx_http_mogilefs_filter_init(void *data);
 static ngx_int_t ngx_http_mogilefs_filter(void *data, ssize_t bytes);
 
-static ngx_int_t
-ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
+static ngx_int_t ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
+static ngx_int_t ngx_http_mogilefs_parse_param(ngx_http_mogilefs_ctx_t *ctx, ngx_str_t *param);
 
 static void *ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent,
@@ -222,10 +222,11 @@ ngx_http_mogilefs_reinit_request(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_mogilefs_process_header(ngx_http_request_t *r)
 {
-    u_char                    *p, *len;
-    ngx_str_t                  line;
+    u_char                    *p;
+    ngx_str_t                  line, param;
     ngx_http_upstream_t       *u;
     ngx_http_mogilefs_ctx_t   *ctx;
+    ngx_int_t                  rc;
 
     u = r->upstream;
 
@@ -238,9 +239,7 @@ ngx_http_mogilefs_process_header(ngx_http_request_t *r)
     return NGX_AGAIN;
 found:
 
-    *p = '\0';
-
-    line.len = p - u->buffer.pos - 1;
+    line.len = p - u->buffer.pos;
     line.data = u->buffer.pos;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -250,40 +249,56 @@ found:
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
-    if (ngx_strncmp(p, "paths ", sizeof("paths ") - 1) == 0) {
+    if (line.len < sizeof("paths ") - 1 || ngx_strncmp(p, "paths ", sizeof("paths ") - 1) != 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "mogilefs tracker has sent invalid response: \"%V\"", &line);
 
-        p += sizeof("paths ") - 1;
+        return NGX_HTTP_UPSTREAM_INVALID_HEADER;
+    }
 
-        /* skip flags */
+    p += sizeof("paths ") - 1;
 
-        while (*p) {
-            if (*p++ == ' ') {
-                goto length;
+    param.data = p;
+    param.len = 0;
+
+    while (*p != LF) {
+        if (*p == '&' || *p == CR) {
+            rc = ngx_http_mogilefs_parse_param(ctx, &param);
+
+            if(rc != NGX_OK) {
+                return rc;
+            }
+
+            p++;
+
+            param.data = p;
+            param.len = 0;
+
+            if(*p == CR) {
+                break;
+            }
+            else {
+                continue;
             }
         }
 
-        goto no_valid;
-
-    length:
-
-        len = p;
-
-        while (*p && *p++ != CR) { /* void */ }
-
-        r->headers_out.content_length_n = 0;
-        u->headers_in.status_n = 200;
-        u->state->status = 200;
-        u->buffer.pos = p + 1;
-
-        return NGX_OK;
+        param.len++;
+        p++;
     }
 
-no_valid:
+    r->headers_out.content_length_n = 0;
+    u->headers_in.status_n = 200;
+    u->state->status = 200;
 
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                  "mogilefs tracker has sent invalid response: \"%V\"", &line);
+    // Produce no content
+    u->buffer.pos = u->buffer.pos;
 
-    return NGX_HTTP_UPSTREAM_INVALID_HEADER;
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_parse_param(ngx_http_mogilefs_ctx_t *ctx, ngx_str_t *param) {
+    return NGX_OK;
 }
 
 static void
