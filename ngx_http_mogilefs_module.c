@@ -9,6 +9,11 @@
 #include <ngx_http.h>
 
 typedef struct {
+    ngx_int_t                status; 
+    ngx_str_t                name;
+} ngx_http_mogilefs_error_t;
+
+typedef struct {
     ngx_http_upstream_conf_t   upstream;
     ngx_str_t                  domain;
 } ngx_http_mogilefs_loc_conf_t;
@@ -38,6 +43,13 @@ static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 
 static char *
 ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
+static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
+    {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key")},
+    {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found")},
+
+    {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string},
+};
 
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
@@ -240,21 +252,26 @@ ngx_http_mogilefs_reinit_request(ngx_http_request_t *r)
 }
 
 static ngx_int_t
-ngx_http_mogilefs_process_errorneous_header(ngx_http_request_t *r, ngx_http_upstream_t *u, ngx_str_t *line)
+ngx_http_mogilefs_process_error_header(ngx_http_request_t *r,
+    ngx_http_upstream_t *u, ngx_str_t *line)
 {
-    ngx_int_t status;
+    ngx_http_mogilefs_error_t *e;
 
-    if (line->len >= sizeof("unknown_key") - 1 && ngx_strncmp(line->data, "unknown_key", sizeof("unknown_key") - 1) == 0) {
-        status = 404;
-    } else if (line->len >= sizeof("domain_not_found") - 1 && ngx_strncmp(line->data, "domain_not_found", sizeof("domain_not_found") - 1) == 0) {
-        status = 404;
-    } else {
-        status = 500;
+    e = ngx_http_mogilefs_errors;
+
+    while(e->name.data != NULL) {
+        if(line->len >= e->name.len &&
+            ngx_strncmp(line->data, e->name.data, e->name.len) == 0)
+        {
+            break;
+        }
+
+        e++;
     }
 
     r->headers_out.content_length_n = 0;
-    u->headers_in.status_n = status;
-    u->state->status = status;
+    u->headers_in.status_n = e->status;
+    u->state->status = e->status;
 
     // Return no content
     u->buffer.pos = u->buffer.pos;
@@ -299,7 +316,7 @@ found:
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "mogilefs response: \"%V\"", &line);
 
-        return ngx_http_mogilefs_process_errorneous_header(r, u, &line);
+        return ngx_http_mogilefs_process_error_header(r, u, &line);
     }
 
     if (line.len < sizeof("OK ") - 1 || ngx_strncmp(p, "OK ", sizeof("OK ") - 1) != 0) {
