@@ -170,7 +170,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 
     escape = 2 * ngx_escape_uri(NULL, vv->data, vv->len, NGX_ESCAPE_MEMCACHED);
 
-    len = sizeof("get_paths ") - 1 + vv->len + escape + sizeof(CRLF) - 1;
+    len = sizeof("get_paths ") - 1 + 20 + vv->len + escape + sizeof(CRLF) - 1;
 
     b = ngx_create_temp_buf(r->pool, len);
     if (b == NULL) {
@@ -190,6 +190,15 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     *b->last++ = 'g'; *b->last++ = 'e'; *b->last++ = 't';  *b->last++ = '_';
     *b->last++ = 'p'; *b->last++ = 'a'; *b->last++ = 't';  *b->last++ = 'h';
     *b->last++ = 's'; *b->last++ = ' ';
+
+    *b->last++ = 'd'; *b->last++ = 'o'; *b->last++ = 'm';  *b->last++ = 'a';
+    *b->last++ = 'i'; *b->last++ = 'n'; *b->last++ = '=';  *b->last++ = 'd';
+    *b->last++ = 'e'; *b->last++ = 'f'; *b->last++ = 'a'; *b->last++ = 'u';
+    *b->last++ = 'l'; *b->last++ = 't';
+
+    *b->last++ = '&';
+
+    *b->last++ = 'k'; *b->last++ = 'e'; *b->last++ = 'y';  *b->last++ = '=';
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
@@ -216,6 +225,27 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_mogilefs_reinit_request(ngx_http_request_t *r)
 {
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_process_errorneous_header(ngx_http_request_t *r, ngx_http_upstream_t *u, ngx_str_t *line)
+{
+    ngx_int_t status;
+
+    if (line->len >= sizeof("unknown_key") - 1 && ngx_strncmp(line->data, "unknown_key", sizeof("unknown_key") - 1) == 0) {
+        status = 404;
+    } else if (line->len >= sizeof("domain_not_found") - 1 && ngx_strncmp(line->data, "domain_not_found", sizeof("domain_not_found") - 1) == 0) {
+        status = 404;
+    }
+
+    r->headers_out.content_length_n = 0;
+    u->headers_in.status_n = status;
+    u->state->status = status;
+
+    // Return no content
+    u->buffer.pos = u->buffer.pos;
+
     return NGX_OK;
 }
 
@@ -249,7 +279,17 @@ found:
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
-    if (line.len < sizeof("paths ") - 1 || ngx_strncmp(p, "paths ", sizeof("paths ") - 1) != 0) {
+    if (line.len >= sizeof("ERR ") - 1 && ngx_strncmp(p, "ERR ", sizeof("ERR ") - 1) == 0) {
+        line.data += sizeof("ERR ") - 1;
+        line.len -= sizeof("ERR ") - 1;
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "mogilefs response: \"%V\"", &line);
+
+        return ngx_http_mogilefs_process_errorneous_header(r, u, &line);
+    }
+
+    if (line.len < sizeof("OK ") - 1 || ngx_strncmp(p, "OK ", sizeof("OK ") - 1) != 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "mogilefs tracker has sent invalid response: \"%V\"", &line);
 
@@ -290,7 +330,7 @@ found:
     u->headers_in.status_n = 200;
     u->state->status = 200;
 
-    // Produce no content
+    // Return no content
     u->buffer.pos = u->buffer.pos;
 
     return NGX_OK;
@@ -491,7 +531,7 @@ ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     if (ngx_strncasecmp(url->data, (u_char *) "mogilefs://", 11) == 0) {
         add = 11;
-        port = 7501;
+        port = 6001;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "invalid URL prefix");
         return NGX_CONF_ERROR;
