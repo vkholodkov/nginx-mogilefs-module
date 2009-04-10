@@ -10,11 +10,11 @@
 
 typedef struct {
     ngx_http_upstream_conf_t   upstream;
+    ngx_str_t                  domain;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
     ngx_http_request_t        *request;
-    ngx_str_t                 key;
     ngx_uint_t                done;
     ngx_array_t               parts; 
 } ngx_http_mogilefs_ctx_t;
@@ -46,6 +46,13 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       ngx_http_mogilefs_pass_command,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
+      NULL },
+
+    { ngx_string("mogilefs_domain"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_mogilefs_loc_conf_t, domain),
       NULL },
 
       ngx_null_command
@@ -151,12 +158,12 @@ static ngx_int_t
 ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 {
     size_t                          len;
-    uintptr_t                       escape;
+    uintptr_t                       escape_domain, escape_key;
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
-    ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_variable_value_t      *vv;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
+    ngx_str_t                       request;
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
@@ -168,9 +175,11 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
-    escape = 2 * ngx_escape_uri(NULL, vv->data, vv->len, NGX_ESCAPE_MEMCACHED);
+    escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
+    escape_key = 2 * ngx_escape_uri(NULL, vv->data, vv->len, NGX_ESCAPE_MEMCACHED);
 
-    len = sizeof("get_paths ") - 1 + 20 + vv->len + escape + sizeof(CRLF) - 1;
+    len = sizeof("get_paths ") - 1 + sizeof("key=") - 1 + vv->len + escape_key + 1 +
+        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1;
 
     b = ngx_create_temp_buf(r->pool, len);
     if (b == NULL) {
@@ -191,20 +200,9 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     *b->last++ = 'p'; *b->last++ = 'a'; *b->last++ = 't';  *b->last++ = 'h';
     *b->last++ = 's'; *b->last++ = ' ';
 
-    *b->last++ = 'd'; *b->last++ = 'o'; *b->last++ = 'm';  *b->last++ = 'a';
-    *b->last++ = 'i'; *b->last++ = 'n'; *b->last++ = '=';  *b->last++ = 'd';
-    *b->last++ = 'e'; *b->last++ = 'f'; *b->last++ = 'a'; *b->last++ = 'u';
-    *b->last++ = 'l'; *b->last++ = 't';
+    b->last = ngx_copy(b->last, "key=", sizeof("key=") - 1);
 
-    *b->last++ = '&';
-
-    *b->last++ = 'k'; *b->last++ = 'e'; *b->last++ = 'y';  *b->last++ = '=';
-
-    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
-
-    ctx->key.data = b->last;
-
-    if (escape == 0) {
+    if (escape_key == 0) {
         b->last = ngx_copy(b->last, vv->data, vv->len);
 
     } else {
@@ -212,10 +210,23 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
                                             NGX_ESCAPE_MEMCACHED);
     }
 
-    ctx->key.len = b->last - ctx->key.data;
+    *b->last++ = '&';
+
+    b->last = ngx_copy(b->last, "domain=", sizeof("domain=") - 1);
+
+    if (escape_domain == 0) {
+        b->last = ngx_copy(b->last, mgcf->domain.data, mgcf->domain.len);
+
+    } else {
+        b->last = (u_char *) ngx_escape_uri(b->last, mgcf->domain.data, mgcf->domain.len,
+                                            NGX_ESCAPE_MEMCACHED);
+    }
+
+    request.data = b->pos;
+    request.len = b->last - b->pos;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "mogilefs request: \"%V\"", &ctx->key);
+                   "mogilefs request: \"%V\"", &request);
 
     *b->last++ = CR; *b->last++ = LF;
 
@@ -237,6 +248,8 @@ ngx_http_mogilefs_process_errorneous_header(ngx_http_request_t *r, ngx_http_upst
         status = 404;
     } else if (line->len >= sizeof("domain_not_found") - 1 && ngx_strncmp(line->data, "domain_not_found", sizeof("domain_not_found") - 1) == 0) {
         status = 404;
+    } else {
+        status = 500;
     }
 
     r->headers_out.content_length_n = 0;
@@ -505,6 +518,8 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->upstream.next_upstream = NGX_CONF_BITMASK_SET
                                        |NGX_HTTP_UPSTREAM_FT_OFF;
     }
+
+    ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
 
     return NGX_CONF_OK;
 }
