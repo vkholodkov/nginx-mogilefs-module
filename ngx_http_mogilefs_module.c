@@ -14,14 +14,20 @@ typedef struct {
 } ngx_http_mogilefs_error_t;
 
 typedef struct {
+    ngx_int_t                  index;
     ngx_http_upstream_conf_t   upstream;
     ngx_str_t                  domain;
+    ngx_str_t                  uri;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
     ngx_uint_t                done;
     ngx_array_t               parts; 
 } ngx_http_mogilefs_ctx_t;
+
+typedef struct {
+    ngx_str_t                 path;
+} ngx_http_mogilefs_part_t;
 
 static ngx_int_t ngx_http_mogilefs_create_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_mogilefs_reinit_request(ngx_http_request_t *r);
@@ -35,9 +41,13 @@ static ngx_int_t ngx_http_mogilefs_filter(void *data, ssize_t bytes);
 static ngx_int_t ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
 static ngx_int_t ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param);
 
+static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+
 static void *ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent,
     void *child);
+static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
 static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 
 static char *
@@ -53,7 +63,7 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_pass"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
       ngx_http_mogilefs_pass_command,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -70,8 +80,8 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
 };
 
 static ngx_http_module_t  ngx_http_mogilefs_module_ctx = {
-    NULL,                                  /* preconfiguration */
-    ngx_http_mogilefs_init,                /* postconfiguration */
+    ngx_http_mogilefs_add_variables,       /* preconfiguration */
+    NULL,                                  /* postconfiguration */
 
     NULL,                                  /* create main configuration */
     NULL,                                  /* init main configuration */
@@ -81,6 +91,20 @@ static ngx_http_module_t  ngx_http_mogilefs_module_ctx = {
 
     ngx_http_mogilefs_create_loc_conf,     /* create location configuration */
     ngx_http_mogilefs_merge_loc_conf       /* merge location configuration */
+};
+
+static ngx_http_module_t  ngx_http_mogilefs_body_module_ctx = {
+    NULL,                                  /* preconfiguration */
+    ngx_http_mogilefs_init,                /* postconfiguration */
+
+    NULL,                                  /* create main configuration */
+    NULL,                                  /* init main configuration */
+
+    NULL,                                  /* create server configuration */
+    NULL,                                  /* merge server configuration */
+
+    NULL,                                  /* create location configuration */
+    NULL                                   /* merge location configuration */
 };
 
 ngx_module_t  ngx_http_mogilefs_module = {
@@ -97,6 +121,32 @@ ngx_module_t  ngx_http_mogilefs_module = {
     NULL,                                  /* exit master */
     NGX_MODULE_V1_PADDING
 };
+
+ngx_module_t  ngx_http_mogilefs_body_filter_module = {
+    NGX_MODULE_V1,
+    &ngx_http_mogilefs_body_module_ctx,    /* module context */
+    NULL,                                  /* module directives */
+    NGX_HTTP_MODULE,                       /* module type */
+    NULL,                                  /* init master */
+    NULL,                                  /* init module */
+    NULL,                                  /* init process */
+    NULL,                                  /* init thread */
+    NULL,                                  /* exit thread */
+    NULL,                                  /* exit process */
+    NULL,                                  /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
+
+    { ngx_string("mogilefs_path"), NULL, ngx_http_mogilefs_path_variable,
+      (uintptr_t) offsetof(ngx_http_mogilefs_ctx_t, parts),
+      NGX_HTTP_VAR_CHANGEABLE|NGX_HTTP_VAR_NOCACHEABLE|NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_null_string, NULL, NULL, 0, 0, 0 }
+}; /* }}} */
+
+static ngx_str_t  ngx_http_mogilefs_key = ngx_string("mogilefs_key");
 
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 
@@ -152,6 +202,10 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
+    ctx->done = 0;
+
+    ngx_array_init(&ctx->parts, r->pool, 1, sizeof(ngx_http_mogilefs_part_t));
+
     ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
 
     u->input_filter_init = ngx_http_mogilefs_filter_init;
@@ -176,7 +230,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    vv = ngx_http_get_indexed_variable(r, 1);
+    vv = ngx_http_get_indexed_variable(r, mgcf->index);
 
     if (vv == NULL || vv->not_found || vv->len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -252,9 +306,9 @@ static ngx_int_t
 ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_upstream_t *u, ngx_str_t *line)
 {
-    u_char                    *p;
-    ngx_str_t                  param;
-    ngx_int_t                  rc;
+    u_char                          *p;
+    ngx_str_t                        param;
+    ngx_int_t                        rc;
 
     line->data += sizeof("OK ") - 1;
     line->len -= sizeof("OK ") - 1;
@@ -309,7 +363,7 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
     line->len -= sizeof("ERR ") - 1;
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                  "mogilefs error: \"%V\"", &line);
+                  "mogilefs error: \"%V\"", line);
 
     e = ngx_http_mogilefs_errors;
 
@@ -336,11 +390,38 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
     ngx_http_mogilefs_ctx_t   *ctx;
+    ngx_http_mogilefs_part_t  *part;
+    u_char                    *p;
 
+    ngx_str_t                  name;
+    ngx_str_t                  value;
+
+    p = (u_char *) ngx_strchr(param->data, '=');
+
+    if(p == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "mogilefs tracker has sent invalid param: \"%V\"", param);
+        return NGX_ERROR;
+    }
+
+    name.data = param->data;
+    name.len = p - param->data - 1;
+
+    value.data = p + 1;
+    value.len = param->len - (p - param->data) - 1;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "mogilefs param: \"%V\"=\"%V\"", &name, &value);
+    
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                  "mogilefs param: \"%V\"", param);
+    part = ngx_array_push(&ctx->parts);
+
+    if(part == NULL) {
+        return NGX_ERROR;
+    }
+
+    part->path = value;
 
     return NGX_OK;
 }
@@ -370,13 +451,13 @@ found:
                    "mogilefs: \"%V\"", &line);
 
     if (line.len >= sizeof("ERR ") - 1 &&
-        ngx_strncmp(p, "ERR ", sizeof("ERR ") - 1) == 0)
+        ngx_strncmp(line.data, "ERR ", sizeof("ERR ") - 1) == 0)
     {
         return ngx_http_mogilefs_process_error_response(r, u, &line);
     }
 
     if (line.len >= sizeof("OK ") - 1 &&
-        ngx_strncmp(p, "OK ", sizeof("OK ") - 1) != 0)
+        ngx_strncmp(line.data, "OK ", sizeof("OK ") - 1) == 0)
     {
         return ngx_http_mogilefs_process_ok_response(r, u, &line);
     }
@@ -423,11 +504,12 @@ ngx_http_mogilefs_header_filter(ngx_http_request_t *r) {
 static ngx_int_t
 ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
-    ngx_str_t               *uri, args;
     ngx_int_t                rc;
-    ngx_uint_t               i, flags, last;
+    ngx_uint_t               i, last;
     ngx_http_request_t      *sr;
     ngx_http_mogilefs_ctx_t *ctx;
+    ngx_http_mogilefs_loc_conf_t   *mgcf;
+    ngx_http_mogilefs_part_t *p;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
@@ -476,26 +558,49 @@ ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     ctx->done = 1;
 
-    uri = ctx->parts.elts;
+    p = ctx->parts.elts;
+
+    mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
     for (i = 0; i < ctx->parts.nelts; i++) {
 
-        args.len = 0;
-        args.data = NULL;
-        flags = 0;
+        rc = ngx_http_subrequest(r, &mgcf->uri, NULL, &sr, NULL, 0);
 
-        if (ngx_http_parse_unsafe_uri(r, &uri[i], &args, &flags) != NGX_OK) {
-            return NGX_ERROR;
-        }
-
-        rc = ngx_http_subrequest(r, &uri[i], &args, &sr, NULL, flags);
+        ngx_http_set_ctx(sr, p, ngx_http_mogilefs_module);   
 
         if (rc == NGX_ERROR || rc == NGX_DONE) {
             return rc;
         }
+
+        p++;
     }
 
     return ngx_http_send_special(r, NGX_HTTP_LAST);
+}
+
+static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data) 
+{
+    ngx_http_mogilefs_part_t    *p;
+
+    if(r->main == r) {
+        v->valid = 0;
+        v->no_cacheable = 0;
+        v->not_found = 1;
+
+        return NGX_OK;
+    }
+
+    p = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+
+    v->len = p->path.len;
+    v->data = p->path.data;
+
+    return NGX_OK;
 }
 
 static void *
@@ -567,13 +672,28 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     return NGX_CONF_OK;
 }
 
+static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf)
+{
+    ngx_http_variable_t  *var, *v;
+
+    for (v = ngx_http_mogilefs_variables; v->name.len; v++) {
+        var = ngx_http_add_variable(cf, &v->name, v->flags);
+        if (var == NULL) {
+            return NGX_ERROR;
+        }
+
+        var->get_handler = v->get_handler;
+        var->data = v->data;
+    }
+
+    return NGX_OK;
+}
+
 static char *
 ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    size_t                           add;
-    u_short                          port;
     ngx_url_t                        u;
-    ngx_str_t                       *value, *url;
+    ngx_str_t                       *value;
     ngx_http_mogilefs_loc_conf_t    *mgcf = conf;
     ngx_http_core_loc_conf_t        *clcf;
 
@@ -583,32 +703,28 @@ ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    url = &value[1];
-
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
-
-    if (ngx_strncasecmp(url->data, (u_char *) "mogilefs://", 11) == 0) {
-        add = 11;
-        port = 6001;
-    } else {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "invalid URL prefix");
-        return NGX_CONF_ERROR;
-    }
-
     ngx_memzero(&u, sizeof(ngx_url_t));
 
-    u.url.len = url->len - add;
-    u.url.data = url->data + add;
-    u.default_port = port;
-    u.uri_part = 1;
+    u.url = value[1];
     u.no_resolve = 1;
+    u.default_port = 6001;
 
     mgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
     if (mgcf->upstream.upstream == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+
     clcf->handler = ngx_http_mogilefs_handler;
+
+    mgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_key);
+
+    if (mgcf->index == NGX_ERROR) {
+        return NGX_CONF_ERROR;
+    }
+
+    mgcf->uri = value[2];
 
     return NGX_CONF_OK;
 }
