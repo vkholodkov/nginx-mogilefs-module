@@ -19,7 +19,6 @@ typedef struct {
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
-    ngx_http_request_t        *request;
     ngx_uint_t                done;
     ngx_array_t               parts; 
 } ngx_http_mogilefs_ctx_t;
@@ -34,7 +33,7 @@ static ngx_int_t ngx_http_mogilefs_filter_init(void *data);
 static ngx_int_t ngx_http_mogilefs_filter(void *data, ssize_t bytes);
 
 static ngx_int_t ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in);
-static ngx_int_t ngx_http_mogilefs_parse_param(ngx_http_mogilefs_ctx_t *ctx, ngx_str_t *param);
+static ngx_int_t ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param);
 
 static void *ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent,
@@ -153,8 +152,6 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    ctx->request = r;
-
     ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
 
     u->input_filter_init = ngx_http_mogilefs_filter_init;
@@ -252,88 +249,24 @@ ngx_http_mogilefs_reinit_request(ngx_http_request_t *r)
 }
 
 static ngx_int_t
-ngx_http_mogilefs_process_error_header(ngx_http_request_t *r,
+ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_upstream_t *u, ngx_str_t *line)
 {
-    ngx_http_mogilefs_error_t *e;
-
-    e = ngx_http_mogilefs_errors;
-
-    while(e->name.data != NULL) {
-        if(line->len >= e->name.len &&
-            ngx_strncmp(line->data, e->name.data, e->name.len) == 0)
-        {
-            break;
-        }
-
-        e++;
-    }
-
-    r->headers_out.content_length_n = 0;
-    u->headers_in.status_n = e->status;
-    u->state->status = e->status;
-
-    // Return no content
-    u->buffer.pos = u->buffer.pos;
-
-    return NGX_OK;
-}
-
-static ngx_int_t
-ngx_http_mogilefs_process_header(ngx_http_request_t *r)
-{
     u_char                    *p;
-    ngx_str_t                  line, param;
-    ngx_http_upstream_t       *u;
-    ngx_http_mogilefs_ctx_t   *ctx;
+    ngx_str_t                  param;
     ngx_int_t                  rc;
 
-    u = r->upstream;
+    line->data += sizeof("OK ") - 1;
+    line->len -= sizeof("OK ") - 1;
 
-    for (p = u->buffer.pos; p < u->buffer.last; p++) {
-        if (*p == LF) {
-            goto found;
-        }
-    }
-
-    return NGX_AGAIN;
-found:
-
-    line.len = p - u->buffer.pos;
-    line.data = u->buffer.pos;
-
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "mogilefs: \"%V\"", &line);
-
-    p = u->buffer.pos;
-
-    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
-
-    if (line.len >= sizeof("ERR ") - 1 && ngx_strncmp(p, "ERR ", sizeof("ERR ") - 1) == 0) {
-        line.data += sizeof("ERR ") - 1;
-        line.len -= sizeof("ERR ") - 1;
-
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "mogilefs response: \"%V\"", &line);
-
-        return ngx_http_mogilefs_process_error_header(r, u, &line);
-    }
-
-    if (line.len < sizeof("OK ") - 1 || ngx_strncmp(p, "OK ", sizeof("OK ") - 1) != 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "mogilefs tracker has sent invalid response: \"%V\"", &line);
-
-        return NGX_HTTP_UPSTREAM_INVALID_HEADER;
-    }
-
-    p += sizeof("paths ") - 1;
+    p = line->data;
 
     param.data = p;
     param.len = 0;
 
     while (*p != LF) {
         if (*p == '&' || *p == CR) {
-            rc = ngx_http_mogilefs_parse_param(ctx, &param);
+            rc = ngx_http_mogilefs_parse_param(r, &param);
 
             if(rc != NGX_OK) {
                 return rc;
@@ -367,8 +300,91 @@ found:
 }
 
 static ngx_int_t
-ngx_http_mogilefs_parse_param(ngx_http_mogilefs_ctx_t *ctx, ngx_str_t *param) {
+ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
+    ngx_http_upstream_t *u, ngx_str_t *line)
+{
+    ngx_http_mogilefs_error_t *e;
+
+    line->data += sizeof("ERR ") - 1;
+    line->len -= sizeof("ERR ") - 1;
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "mogilefs error: \"%V\"", &line);
+
+    e = ngx_http_mogilefs_errors;
+
+    while(e->name.data != NULL) {
+        if(line->len >= e->name.len &&
+            ngx_strncmp(line->data, e->name.data, e->name.len) == 0)
+        {
+            break;
+        }
+
+        e++;
+    }
+
+    r->headers_out.content_length_n = 0;
+    u->headers_in.status_n = e->status;
+    u->state->status = e->status;
+
+    // Return no content
+    u->buffer.pos = u->buffer.pos;
+
     return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
+    ngx_http_mogilefs_ctx_t   *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "mogilefs param: \"%V\"", param);
+
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_process_header(ngx_http_request_t *r)
+{
+    u_char                    *p;
+    ngx_str_t                  line;
+    ngx_http_upstream_t       *u;
+
+    u = r->upstream;
+
+    for (p = u->buffer.pos; p < u->buffer.last; p++) {
+        if (*p == LF) {
+            goto found;
+        }
+    }
+
+    return NGX_AGAIN;
+found:
+
+    line.len = p - u->buffer.pos;
+    line.data = u->buffer.pos;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "mogilefs: \"%V\"", &line);
+
+    if (line.len >= sizeof("ERR ") - 1 &&
+        ngx_strncmp(p, "ERR ", sizeof("ERR ") - 1) == 0)
+    {
+        return ngx_http_mogilefs_process_error_response(r, u, &line);
+    }
+
+    if (line.len >= sizeof("OK ") - 1 &&
+        ngx_strncmp(p, "OK ", sizeof("OK ") - 1) != 0)
+    {
+        return ngx_http_mogilefs_process_ok_response(r, u, &line);
+    }
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "mogilefs tracker has sent invalid response: \"%V\"", &line);
+
+    return NGX_HTTP_UPSTREAM_INVALID_HEADER;
 }
 
 static void
@@ -416,9 +432,19 @@ ngx_http_mogilefs_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
     if (ctx == NULL) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-            "mogilefs body filter: no ctx");
-        return ngx_http_next_body_filter(r, in);
+        if(r == r->main) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                "mogilefs body filter: no ctx");
+            return ngx_http_next_body_filter(r, in);
+        }
+        else {
+            /*
+             * Use context of main request
+             */
+            ctx = ngx_http_get_module_ctx(r->main, ngx_http_mogilefs_module);
+
+            ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
+        }
     }
 
     if (ctx->done) {
