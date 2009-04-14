@@ -593,24 +593,12 @@ static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf)
 static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data) 
 {
-    ngx_http_mogilefs_part_t    *p;
-
-    if(r->main == r) {
-        v->valid = 0;
-        v->no_cacheable = 0;
-        v->not_found = 1;
-
-        return NGX_OK;
-    }
-
-    p = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
-
     v->valid = 1;
     v->no_cacheable = 0;
     v->not_found = 0;
 
-    v->len = p->path.len;
-    v->data = p->path.data;
+    v->len = 0;
+    v->data = (u_char*)"";
 
     return NGX_OK;
 }
