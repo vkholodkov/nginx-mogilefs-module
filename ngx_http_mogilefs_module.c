@@ -371,8 +371,10 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
         return NGX_OK;
     }
 
-    ngx_qsort(ctx->sources.elts, ctx->sources.nelts, sizeof(ngx_http_mogilefs_src_t),
-        ngx_http_mogilefs_cmp_sources);
+    if(ctx->sources.nelts > 1) {
+        ngx_qsort(ctx->sources.elts, ctx->sources.nelts, sizeof(ngx_http_mogilefs_src_t),
+            ngx_http_mogilefs_cmp_sources);
+    }
 
     umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
