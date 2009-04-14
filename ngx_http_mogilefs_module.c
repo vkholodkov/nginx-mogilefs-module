@@ -457,7 +457,7 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
 
 static ngx_int_t
 ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
-    u_char                    *p;
+    u_char                    *p, *s, *d;
 
     ngx_str_t                  name;
     ngx_str_t                  value;
@@ -478,6 +478,10 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
 
     value.data = p + 1;
     value.len = param->len - (p - param->data) - 1;
+
+    s = d = value.data;
+
+    ngx_unescape_uri(&d, &s, value.len, NGX_UNESCAPE_URI);
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs param: \"%V\"=\"%V\"", &name, &value);
