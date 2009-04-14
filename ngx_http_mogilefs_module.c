@@ -51,7 +51,7 @@ static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
 static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 
 static char *
-ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
     {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key")},
@@ -63,8 +63,8 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_pass"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
-      ngx_http_mogilefs_pass_command,
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_BLOCK,
+      ngx_http_mogilefs_pass_block,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -686,15 +686,87 @@ static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
 }
 
 static char *
-ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_url_t                        u;
-    ngx_str_t                       *value;
-    ngx_http_mogilefs_loc_conf_t    *mgcf = conf;
-    ngx_http_core_loc_conf_t        *clcf;
+    ngx_http_mogilefs_loc_conf_t *mgcf, *pmgcf = conf;
 
-    if (mgcf->upstream.upstream) {
+    char                      *rv;
+    void                      *mconf;
+    ngx_str_t                  name;
+    ngx_str_t                 *value;
+    ngx_uint_t                 i;
+    ngx_conf_t                 save;
+    ngx_http_module_t         *module;
+    ngx_http_conf_ctx_t       *ctx, *pctx;
+    ngx_http_core_loc_conf_t  *clcf, *pclcf, *rclcf;
+    ngx_http_core_srv_conf_t  *cscf;
+    ngx_url_t                        u;
+
+    if (pmgcf->upstream.upstream) {
         return "is duplicate";
+    }
+
+    ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_conf_ctx_t));
+    if (ctx == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    pctx = cf->ctx;
+    ctx->main_conf = pctx->main_conf;
+    ctx->srv_conf = pctx->srv_conf;
+
+    ctx->loc_conf = ngx_pcalloc(cf->pool, sizeof(void *) * ngx_http_max_module);
+    if (ctx->loc_conf == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    for (i = 0; ngx_modules[i]; i++) {
+        if (ngx_modules[i]->type != NGX_HTTP_MODULE) {
+            continue;
+        }
+
+        module = ngx_modules[i]->ctx;
+
+        if (module->create_loc_conf) {
+
+            mconf = module->create_loc_conf(cf);
+            if (mconf == NULL) {
+                 return NGX_CONF_ERROR;
+            }
+
+            ctx->loc_conf[ngx_modules[i]->ctx_index] = mconf;
+        }
+    }
+
+    mgcf = ctx->loc_conf[ngx_http_mogilefs_module.ctx_index];
+
+    pclcf = pctx->loc_conf[ngx_http_core_module.ctx_index];
+
+    clcf = ctx->loc_conf[ngx_http_core_module.ctx_index];
+
+    name.len = sizeof("/mogstored_fetch_") - 1 + NGX_OFF_T_LEN;
+
+    name.data = ngx_palloc(cf->pool, name.len);
+
+    if(name.data == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    name.len = ngx_sprintf(name.data, "/mogstored_fetch_%O", (off_t)(uintptr_t)clcf) - name.data;
+
+    clcf->loc_conf = ctx->loc_conf;
+    clcf->name = name;
+    clcf->exact_match = 1;
+    clcf->noname = 0;
+    clcf->internal = 1;
+    clcf->noregex = 1;
+
+    cscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_core_module);
+
+    rclcf = cscf->ctx->loc_conf[ngx_http_core_module.ctx_index];
+
+    if (ngx_http_add_location(cf, &rclcf->locations, clcf) != NGX_OK) {
+        return NGX_CONF_ERROR;
     }
 
     value = cf->args->elts;
@@ -705,29 +777,35 @@ ngx_http_mogilefs_pass_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     u.no_resolve = 1;
     u.default_port = 6001;
 
-    mgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
-    if (mgcf->upstream.upstream == NULL) {
+    pmgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
+    if (pmgcf->upstream.upstream == NULL) {
         return NGX_CONF_ERROR;
     }
 
-    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    pclcf->handler = ngx_http_mogilefs_handler;
 
-    clcf->handler = ngx_http_mogilefs_handler;
+    pmgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_key);
 
-    mgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_key);
-
-    if (mgcf->index == NGX_ERROR) {
+    if (pmgcf->index == NGX_ERROR) {
         return NGX_CONF_ERROR;
     }
 
-    mgcf->path_var_index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_path);
+    pmgcf->path_var_index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_path);
 
-    if (mgcf->path_var_index == NGX_ERROR) {
+    if (pmgcf->path_var_index == NGX_ERROR) {
         return NGX_CONF_ERROR;
     }
 
-    mgcf->uri = value[2];
+    pmgcf->uri = clcf->name;
 
-    return NGX_CONF_OK;
+    save = *cf;
+    cf->ctx = ctx;
+    cf->cmd_type = NGX_HTTP_LOC_CONF;
+
+    rv = ngx_conf_parse(cf, NULL);
+
+    *cf = save;
+
+    return rv;
 }
 
