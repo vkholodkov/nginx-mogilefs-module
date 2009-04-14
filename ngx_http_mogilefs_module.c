@@ -359,8 +359,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     /*
      * If no paths retuned, but response was ok, tell the client it's unavailable
      */
-    if(ctx->num_paths_returned == 0 ||
-       (ctx->num_paths_returned < 0 && ctx->sources.nelts == 0))
+    if(ctx->num_paths_returned <= 0 || ctx->sources.nelts == 0)
     {
         r->headers_out.content_length_n = 0;
         u->headers_in.status_n = NGX_HTTP_SERVICE_UNAVAILABLE;
