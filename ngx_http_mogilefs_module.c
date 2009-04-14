@@ -319,7 +319,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_mogilefs_loc_conf_t   *mgcf;
     ngx_http_variable_value_t      *v;
     ngx_http_mogilefs_ctx_t        *ctx;
-    ngx_http_mogilefs_src_t        *src;
+    ngx_http_mogilefs_src_t        *source;
 
     line->data += sizeof("OK ") - 1;
     line->len -= sizeof("OK ") - 1;
@@ -378,12 +378,12 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    src = ctx->sources.elts;
+    source = ctx->sources.elts;
     
     v = r->variables + mgcf->path_var_index;
 
-    v->data = src->path.data;
-    v->len = src->path.len;
+    v->data = source->path.data;
+    v->len = source->path.len;
 
     v->not_found = 0;
     v->no_cacheable = 0;
@@ -457,13 +457,13 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
 
 static ngx_int_t
 ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
-    u_char                    *p, *s, *d;
+    u_char                    *p, *src, *dst;
 
     ngx_str_t                  name;
     ngx_str_t                  value;
 
     ngx_http_mogilefs_ctx_t   *ctx;
-    ngx_http_mogilefs_src_t   *src;
+    ngx_http_mogilefs_src_t   *source;
 
     p = (u_char *) ngx_strchr(param->data, '=');
 
@@ -479,9 +479,9 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
     value.data = p + 1;
     value.len = param->len - (p - param->data) - 1;
 
-    s = d = value.data;
+    src = dst = value.data;
 
-    ngx_unescape_uri(&d, &s, value.len, NGX_UNESCAPE_URI);
+    ngx_unescape_uri(&dst, &src, value.len, NGX_UNESCAPE_URI);
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs param: \"%V\"=\"%V\"", &name, &value);
@@ -492,14 +492,14 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
         && ngx_strncmp(name.data, "path", sizeof("path") - 1) == 0
         && ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1) != NGX_ERROR)
     {
-        src = ngx_array_push(&ctx->sources);
+        source = ngx_array_push(&ctx->sources);
 
-        if(src == NULL) {
+        if(source == NULL) {
             return NGX_ERROR;
         }
 
-        src->priority = ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1);
-        src->path = value;
+        source->priority = ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1);
+        source->path = value;
     }
     else if(name.len == sizeof("paths") - 1 &&
         ngx_strncmp(name.data, "paths", sizeof("paths") - 1) == 0)
