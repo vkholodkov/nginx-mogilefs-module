@@ -21,12 +21,14 @@ typedef struct {
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
-    ngx_array_t               parts; 
+    ngx_array_t               sources; 
+    ssize_t                   num_paths_returned;
 } ngx_http_mogilefs_ctx_t;
 
 typedef struct {
+    ssize_t                   priority;
     ngx_str_t                 path;
-} ngx_http_mogilefs_part_t;
+} ngx_http_mogilefs_src_t;
 
 static ngx_int_t ngx_http_mogilefs_create_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_mogilefs_reinit_request(ngx_http_request_t *r);
@@ -130,7 +132,7 @@ ngx_module_t  ngx_http_mogilefs_module = {
 static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
 
     { ngx_string("mogilefs_path"), NULL, ngx_http_mogilefs_path_variable,
-      (uintptr_t) offsetof(ngx_http_mogilefs_ctx_t, parts),
+      (uintptr_t) offsetof(ngx_http_mogilefs_ctx_t, sources),
       NGX_HTTP_VAR_CHANGEABLE, 0 },
 
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
@@ -192,7 +194,9 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    ngx_array_init(&ctx->parts, r->pool, 1, sizeof(ngx_http_mogilefs_part_t));
+    ctx->num_paths_returned = -1;
+
+    ngx_array_init(&ctx->sources, r->pool, 1, sizeof(ngx_http_mogilefs_src_t));
 
     ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
 
@@ -290,6 +294,17 @@ ngx_http_mogilefs_reinit_request(ngx_http_request_t *r)
     return NGX_OK;
 }
 
+static int ngx_libc_cdecl ngx_http_mogilefs_cmp_sources(const void *one,
+    const void *two)
+{
+    ngx_http_mogilefs_src_t *first, *second;
+
+    first = (ngx_http_mogilefs_src_t *) one;
+    second = (ngx_http_mogilefs_src_t *) two;
+
+    return first->priority - second->priority;
+}
+
 static ngx_int_t
 ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_upstream_t *u, ngx_str_t *line)
@@ -302,6 +317,9 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_upstream_header_t     *hh;
     ngx_http_upstream_main_conf_t  *umcf;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
+    ngx_http_variable_value_t      *v;
+    ngx_http_mogilefs_ctx_t        *ctx;
+    ngx_http_mogilefs_src_t        *src;
 
     line->data += sizeof("OK ") - 1;
     line->len -= sizeof("OK ") - 1;
@@ -336,8 +354,40 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
         p++;
     }
 
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    /*
+     * If no paths retuned, but response was ok, tell the client it's unavailable
+     */
+    if(ctx->num_paths_returned == 0 ||
+       (ctx->num_paths_returned < 0 && ctx->sources.nelts == 0))
+    {
+        r->headers_out.content_length_n = 0;
+        u->headers_in.status_n = NGX_HTTP_SERVICE_UNAVAILABLE;
+        u->state->status = NGX_HTTP_SERVICE_UNAVAILABLE;
+
+        // Return no content
+        u->buffer.pos = u->buffer.pos;
+
+        return NGX_OK;
+    }
+
+    ngx_qsort(ctx->sources.elts, ctx->sources.nelts, sizeof(ngx_http_mogilefs_src_t),
+        ngx_http_mogilefs_cmp_sources);
+
     umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
+
+    src = ctx->sources.elts;
+    
+    v = r->variables + mgcf->path_var_index;
+
+    v->data = src->path.data;
+    v->len = src->path.len;
+
+    v->not_found = 0;
+    v->no_cacheable = 0;
+    v->valid = 1;
 
     if (r->upstream->headers_in.x_accel_redirect == NULL) {
         h = ngx_list_push(&r->upstream->headers_in.headers);
@@ -411,9 +461,9 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
 
     ngx_str_t                  name;
     ngx_str_t                  value;
-    ngx_http_mogilefs_loc_conf_t   *mgcf;
 
-    ngx_http_variable_value_t *v;
+    ngx_http_mogilefs_ctx_t   *ctx;
+    ngx_http_mogilefs_src_t   *src;
 
     p = (u_char *) ngx_strchr(param->data, '=');
 
@@ -432,19 +482,25 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs param: \"%V\"=\"%V\"", &name, &value);
 
-    if(name.len != sizeof("paths") - 1 ||
-        ngx_strncmp(name.data, "paths", sizeof("paths") - 1) != 0)
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    if(name.len >= sizeof("path") - 1
+        && ngx_strncmp(name.data, "path", sizeof("path") - 1) == 0
+        && ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1) != NGX_ERROR)
     {
-        mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
+        src = ngx_array_push(&ctx->sources);
 
-        v = r->variables + mgcf->path_var_index;
+        if(src == NULL) {
+            return NGX_ERROR;
+        }
 
-        v->data = value.data;
-        v->len = value.len;
-
-        v->not_found = 0;
-        v->no_cacheable = 0;
-        v->valid = 1;
+        src->priority = ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1);
+        src->path = value;
+    }
+    else if(name.len == sizeof("paths") - 1 &&
+        ngx_strncmp(name.data, "paths", sizeof("paths") - 1) == 0)
+    {
+        ctx->num_paths_returned = ngx_atoi(value.data, value.len);
     }
 
     return NGX_OK;
