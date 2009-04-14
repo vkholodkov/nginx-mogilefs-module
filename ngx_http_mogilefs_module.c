@@ -21,7 +21,6 @@ typedef struct {
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
-    ngx_uint_t                done;
     ngx_array_t               parts; 
 } ngx_http_mogilefs_ctx_t;
 
@@ -171,8 +170,6 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     if (ctx == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-
-    ctx->done = 0;
 
     ngx_array_init(&ctx->parts, r->pool, 1, sizeof(ngx_http_mogilefs_part_t));
 
