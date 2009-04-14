@@ -371,16 +371,21 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    /*
+     * Sort sources and choose top source
+     */
     if(ctx->sources.nelts > 1) {
         ngx_qsort(ctx->sources.elts, ctx->sources.nelts, sizeof(ngx_http_mogilefs_src_t),
             ngx_http_mogilefs_cmp_sources);
     }
 
-    umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
     source = ctx->sources.elts;
     
+    /*
+     * Set $mogilefs_path variable
+     */
     v = r->variables + mgcf->path_var_index;
 
     v->data = source->path.data;
@@ -390,7 +395,13 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     v->no_cacheable = 0;
     v->valid = 1;
 
+    /*
+     * Redirect to fetch location
+     */
     if (r->upstream->headers_in.x_accel_redirect == NULL) {
+
+        umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
+
         h = ngx_list_push(&r->upstream->headers_in.headers);
         if (h == NULL) {
             return NGX_ERROR;
