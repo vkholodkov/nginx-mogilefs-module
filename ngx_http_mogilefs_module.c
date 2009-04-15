@@ -61,6 +61,7 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
     {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key")},
     {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found")},
+    {NGX_HTTP_BAD_REQUEST,              ngx_string("no_key")},
 
     {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string},
 };
@@ -524,7 +525,7 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
 
     ngx_unescape_uri(&dst, &src, value.len, NGX_UNESCAPE_URI);
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs param: \"%V\"=\"%V\"", &name, &value);
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
