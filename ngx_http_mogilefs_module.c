@@ -14,10 +14,13 @@ typedef struct {
 } ngx_http_mogilefs_error_t;
 
 typedef struct {
-    ngx_int_t                  index, path_var_index;
+    ngx_str_t                  key;
+    ngx_array_t                *key_lengths;
+    ngx_array_t                *key_values;
+    ngx_int_t                  index;
     ngx_http_upstream_conf_t   upstream;
     ngx_str_t                  domain;
-    ngx_str_t                  uri;
+    ngx_str_t                  fetch_location;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
@@ -51,6 +54,8 @@ static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
 static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 
 static char *
+ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *
 ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
@@ -63,8 +68,15 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_pass"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_BLOCK,
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS|NGX_CONF_TAKE1|NGX_CONF_BLOCK,
       ngx_http_mogilefs_pass_block,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
+
+    { ngx_string("mogilefs_tracker"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_http_mogilefs_tracker_command,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -138,8 +150,6 @@ static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
 }; /* }}} */
 
-static ngx_str_t  ngx_http_mogilefs_key = ngx_string("mogilefs_key");
-
 static ngx_str_t  ngx_http_mogilefs_path = ngx_string("mogilefs_path");
 
 static ngx_int_t
@@ -212,28 +222,47 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 static ngx_int_t
 ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 {
-    size_t                          len;
+    size_t                          len, loc_len;
     uintptr_t                       escape_domain, escape_key;
+    ngx_str_t                       key;
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
-    ngx_http_variable_value_t      *vv;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
+    ngx_http_core_loc_conf_t       *clcf;
     ngx_str_t                       request;
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    vv = ngx_http_get_indexed_variable(r, mgcf->index);
+    /*
+     * If key is empty take the remaining part of request URI,
+     * otherwise run script to obtain key
+     */
+    if(mgcf->key.len == 0) {
+        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
-    if (vv == NULL || vv->not_found || vv->len == 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "the \"$mogilefs_key\" variable is not set");
-        return NGX_ERROR;
+        loc_len = r->valid_location ? clcf->name.len : 0;
+
+        key.data = r->unparsed_uri.data + loc_len;
+        key.len = r->unparsed_uri.len - loc_len;
+    }
+    else {
+        if(mgcf->key_lengths != NULL) {
+            if (ngx_http_script_run(r, &key, mgcf->key_lengths->elts, 0,
+                                    mgcf->key_values->elts)
+                == NULL)
+            {
+                return NGX_ERROR;
+            }
+        }
+        else {
+            key = mgcf->key;
+        }
     }
 
     escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
-    escape_key = 2 * ngx_escape_uri(NULL, vv->data, vv->len, NGX_ESCAPE_MEMCACHED);
+    escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
 
-    len = sizeof("get_paths ") - 1 + sizeof("key=") - 1 + vv->len + escape_key + 1 +
+    len = sizeof("get_paths ") - 1 + sizeof("key=") - 1 + key.len + escape_key + 1 +
         sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1;
 
     b = ngx_create_temp_buf(r->pool, len);
@@ -258,10 +287,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     b->last = ngx_copy(b->last, "key=", sizeof("key=") - 1);
 
     if (escape_key == 0) {
-        b->last = ngx_copy(b->last, vv->data, vv->len);
+        b->last = ngx_copy(b->last, key.data, key.len);
 
     } else {
-        b->last = (u_char *) ngx_escape_uri(b->last, vv->data, vv->len,
+        b->last = (u_char *) ngx_escape_uri(b->last, key.data, key.len,
                                             NGX_ESCAPE_MEMCACHED);
     }
 
@@ -386,7 +415,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     /*
      * Set $mogilefs_path variable
      */
-    v = r->variables + mgcf->path_var_index;
+    v = r->variables + mgcf->index;
 
     v->data = source->path.data;
     v->len = source->path.len;
@@ -412,7 +441,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
 
         h->key.len = sizeof("X-Accel-Redirect") - 1;
         h->key.data = (u_char *) "X-Accel-Redirect";
-        h->value = mgcf->uri;
+        h->value = mgcf->fetch_location;
         h->lowcase_key = (u_char *) "x-accel-redirect";
 
         hh = ngx_hash_find(&umcf->headers_in_hash, h->hash,
@@ -661,6 +690,10 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
                                        |NGX_HTTP_UPSTREAM_FT_OFF;
     }
 
+    if (conf->upstream.upstream == NULL) {
+        conf->upstream.upstream = prev->upstream.upstream;
+    }
+
     ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
 
     return NGX_CONF_OK;
@@ -697,6 +730,33 @@ static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
 }
 
 static char *
+ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_mogilefs_loc_conf_t    *mgcf = conf;
+    ngx_str_t                       *value;
+    ngx_url_t                        u;
+
+    if (mgcf->upstream.upstream) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    ngx_memzero(&u, sizeof(ngx_url_t));
+
+    u.url = value[1];
+    u.no_resolve = 1;
+    u.default_port = 6001;
+
+    mgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
+    if (mgcf->upstream.upstream == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+static char *
 ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_mogilefs_loc_conf_t *mgcf, *pmgcf = conf;
@@ -711,10 +771,15 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_conf_ctx_t       *ctx, *pctx;
     ngx_http_core_loc_conf_t  *clcf, *pclcf, *rclcf;
     ngx_http_core_srv_conf_t  *cscf;
-    ngx_url_t                        u;
+    ngx_http_script_compile_t  sc;
+    ngx_uint_t                 n;
 
-    if (pmgcf->upstream.upstream) {
+    if (pmgcf->fetch_location.len != 0) {
         return "is duplicate";
+    }
+
+    if (pmgcf->upstream.upstream == 0) {
+        return "no tracker defined";
     }
 
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_conf_ctx_t));
@@ -780,34 +845,37 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    value = cf->args->elts;
+    pmgcf->fetch_location = clcf->name;
 
-    ngx_memzero(&u, sizeof(ngx_url_t));
-
-    u.url = value[1];
-    u.no_resolve = 1;
-    u.default_port = 6001;
-
-    pmgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
-    if (pmgcf->upstream.upstream == NULL) {
-        return NGX_CONF_ERROR;
-    }
-
-    pclcf->handler = ngx_http_mogilefs_handler;
-
-    pmgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_key);
+    pmgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_path);
 
     if (pmgcf->index == NGX_ERROR) {
         return NGX_CONF_ERROR;
     }
 
-    pmgcf->path_var_index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_path);
+    pclcf->handler = ngx_http_mogilefs_handler;
 
-    if (pmgcf->path_var_index == NGX_ERROR) {
-        return NGX_CONF_ERROR;
+    if(cf->args->nelts > 1) { 
+        value = cf->args->elts;
+
+        pmgcf->key = value[1];
+
+        n = ngx_http_script_variables_count(&pmgcf->key);
+
+        ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
+
+        sc.cf = cf;
+        sc.source = &pmgcf->key;
+        sc.lengths = &pmgcf->key_lengths;
+        sc.values = &pmgcf->key_values;
+        sc.variables = n;
+        sc.complete_lengths = 1;
+        sc.complete_values = 1;
+
+        if (ngx_http_script_compile(&sc) != NGX_OK) {
+            return NGX_CONF_ERROR;
+        }
     }
-
-    pmgcf->uri = clcf->name;
 
     save = *cf;
     cf->ctx = ctx;
