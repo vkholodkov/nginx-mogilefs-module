@@ -21,6 +21,7 @@ typedef struct {
     ngx_http_upstream_conf_t   upstream;
     ngx_str_t                  domain;
     ngx_str_t                  fetch_location;
+    ngx_flag_t                 noverify;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
@@ -108,6 +109,13 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       ngx_conf_set_msec_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_mogilefs_loc_conf_t, upstream.read_timeout),
+      NULL },
+
+    { ngx_string("mogilefs_noverify"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_flag_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_mogilefs_loc_conf_t, noverify),
       NULL },
 
       ngx_null_command
@@ -264,7 +272,8 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
 
     len = sizeof("get_paths ") - 1 + sizeof("key=") - 1 + key.len + escape_key + 1 +
-        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1;
+        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1 +
+        (mgcf->noverify ? 1 + sizeof("noverify=1") - 1 : 0);
 
     b = ngx_create_temp_buf(r->pool, len);
     if (b == NULL) {
@@ -305,6 +314,12 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     } else {
         b->last = (u_char *) ngx_escape_uri(b->last, mgcf->domain.data, mgcf->domain.len,
                                             NGX_ESCAPE_MEMCACHED);
+    }
+
+    if(mgcf->noverify) {
+        *b->last++ = '&';
+
+        b->last = ngx_copy(b->last, "noverify=1", sizeof("noverify=1") - 1);
     }
 
     request.data = b->pos;
@@ -696,6 +711,8 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
     ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
+
+    ngx_conf_merge_value(conf->noverify, prev->noverify, 0);
 
     return NGX_CONF_OK;
 }
