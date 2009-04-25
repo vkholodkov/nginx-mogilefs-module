@@ -14,6 +14,11 @@ typedef struct {
 } ngx_http_mogilefs_error_t;
 
 typedef struct {
+    ngx_uint_t               method; 
+    ngx_str_t                name;
+} ngx_http_mogilefs_cmd_t;
+
+typedef struct {
     ngx_str_t                  key;
     ngx_array_t                *key_lengths;
     ngx_array_t                *key_values;
@@ -21,7 +26,6 @@ typedef struct {
     ngx_http_upstream_conf_t   upstream;
     ngx_str_t                  domain;
     ngx_str_t                  fetch_location;
-    ngx_flag_t                 noverify;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
@@ -67,6 +71,15 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
     {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string},
 };
 
+static ngx_http_mogilefs_cmd_t ngx_http_mogilefs_cmds[] = {
+    {NGX_HTTP_GET,                      ngx_string("get_paths")},
+    {NGX_HTTP_HEAD,                     ngx_string("get_paths")},
+    {NGX_HTTP_PUT,                      ngx_string("create_open")},
+    {NGX_HTTP_DELETE,                   ngx_string("delete")},
+
+    {0,                                 ngx_null_string},
+};
+
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_pass"),
@@ -109,13 +122,6 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       ngx_conf_set_msec_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_mogilefs_loc_conf_t, upstream.read_timeout),
-      NULL },
-
-    { ngx_string("mogilefs_noverify"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_flag_slot,
-      NGX_HTTP_LOC_CONF_OFFSET,
-      offsetof(ngx_http_mogilefs_loc_conf_t, noverify),
       NULL },
 
       ngx_null_command
@@ -169,7 +175,7 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
 
-    if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
+    if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD|NGX_HTTP_DELETE))) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -229,11 +235,33 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 }
 
 static ngx_int_t
+ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_str_t *cmd)
+{
+    ngx_http_mogilefs_cmd_t *c;
+
+    c = ngx_http_mogilefs_cmds;
+
+    while(c->name.data != NULL) {
+        if(c->method & r->method)
+            break;
+
+        c++;
+    }
+
+    if(c->name.data != NULL) {
+        *cmd = c->name;
+        return NGX_OK;
+    }
+
+    return NGX_ERROR;
+}
+
+static ngx_int_t
 ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 {
     size_t                          len, loc_len;
     uintptr_t                       escape_domain, escape_key;
-    ngx_str_t                       key;
+    ngx_str_t                       cmd, key;
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
@@ -268,12 +296,15 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         }
     }
 
+    if(ngx_http_mogilefs_set_cmd(r, &cmd) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
     escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
     escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
 
-    len = sizeof("get_paths ") - 1 + sizeof("key=") - 1 + key.len + escape_key + 1 +
-        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1 +
-        (mgcf->noverify ? 1 + sizeof("noverify=1") - 1 : 0);
+    len = cmd.len + sizeof("key=") - 1 + key.len + escape_key + 1 +
+        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1;
 
     b = ngx_create_temp_buf(r->pool, len);
     if (b == NULL) {
@@ -290,9 +321,9 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 
     r->upstream->request_bufs = cl;
 
-    *b->last++ = 'g'; *b->last++ = 'e'; *b->last++ = 't';  *b->last++ = '_';
-    *b->last++ = 'p'; *b->last++ = 'a'; *b->last++ = 't';  *b->last++ = 'h';
-    *b->last++ = 's'; *b->last++ = ' ';
+    b->last = ngx_copy(b->last, cmd.data, cmd.len);
+
+    *b->last++ = ' ';
 
     b->last = ngx_copy(b->last, "key=", sizeof("key=") - 1);
 
@@ -314,12 +345,6 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     } else {
         b->last = (u_char *) ngx_escape_uri(b->last, mgcf->domain.data, mgcf->domain.len,
                                             NGX_ESCAPE_MEMCACHED);
-    }
-
-    if(mgcf->noverify) {
-        *b->last++ = '&';
-
-        b->last = ngx_copy(b->last, "noverify=1", sizeof("noverify=1") - 1);
     }
 
     request.data = b->pos;
@@ -673,8 +698,6 @@ ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf)
     conf->upstream.pass_request_headers = 0;
     conf->upstream.pass_request_body = 0;
 
-    conf->noverify = NGX_CONF_UNSET;
-
     return conf;
 }
 
@@ -713,8 +736,6 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
     ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
-
-    ngx_conf_merge_value(conf->noverify, prev->noverify, 0);
 
     return NGX_CONF_OK;
 }
