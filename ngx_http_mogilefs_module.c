@@ -343,7 +343,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
     escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
 
-    len = cmd.len + sizeof("key=") - 1 + key.len + escape_key + 1 +
+    len = cmd.len + 1 + sizeof("key=") - 1 + key.len + escape_key + 1 +
         sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1 +
         (mgcf->noverify ? 1 + sizeof("noverify=1") - 1 : 0);
 
@@ -490,7 +490,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     /*
      * If no paths retuned, but response was ok, tell the client it's unavailable
      */
-    if(ctx->num_paths_returned <= 0 || ctx->sources.nelts == 0)
+    if((ctx->num_paths_returned <= 0 && (!(ctx->cmd->method & NGX_HTTP_PUT))) || ctx->sources.nelts == 0)
     {
         r->headers_out.content_length_n = 0;
         u->headers_in.status_n = NGX_HTTP_SERVICE_UNAVAILABLE;
@@ -648,7 +648,19 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
-    if(name.len >= ctx->cmd->output_param.len
+    if(name.len == sizeof("path") - 1
+        && ngx_strncmp(name.data, "path", sizeof("path") - 1) == 0)
+    {
+        source = ngx_array_push(&ctx->sources);
+
+        if(source == NULL) {
+            return NGX_ERROR;
+        }
+
+        source->priority = 0;
+        source->path = value;
+    }
+    else if(name.len >= ctx->cmd->output_param.len
         && ngx_strncmp(name.data, ctx->cmd->output_param.data, ctx->cmd->output_param.len) == 0
         && ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len + 2) != NGX_ERROR)
     {
