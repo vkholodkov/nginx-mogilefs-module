@@ -19,6 +19,7 @@ typedef struct {
 } ngx_http_mogilefs_cmd_t;
 
 typedef struct {
+    ngx_uint_t                 methods;
     ngx_str_t                  key;
     ngx_array_t                *key_lengths;
     ngx_array_t                *key_values;
@@ -81,6 +82,13 @@ static ngx_http_mogilefs_cmd_t ngx_http_mogilefs_cmds[] = {
     {0,                                 ngx_null_string},
 };
 
+static ngx_conf_bitmask_t  ngx_http_mogilefs_methods_mask[] = {↲
+    { ngx_string("get"), NGX_HTTP_GET },↲
+    { ngx_string("put"), NGX_HTTP_PUT },↲
+    { ngx_string("delete"), NGX_HTTP_DELETE },↲
+    { ngx_null_string, 0 }↲
+};
+
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_pass"),
@@ -131,6 +139,13 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_mogilefs_loc_conf_t, noverify),
       NULL },
+
+    { ngx_string("mogilefs_methods"),↲
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,↲
+      ngx_conf_set_bitmask_slot,↲
+      NGX_HTTP_LOC_CONF_OFFSET,↲
+      offsetof(ngx_http_mogilefs_loc_conf_t, methods),↲
+      &ngx_http_mogilefs_methods_mask },
 
       ngx_null_command
 };
@@ -183,7 +198,9 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
 
-    if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD|NGX_HTTP_DELETE))) {
+    mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
+
+    if (!(r->method & mgcf->methods)) {↲
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -196,8 +213,6 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     if (ngx_http_set_content_type(r) != NGX_OK) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-
-    mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
     u = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_t));
     if (u == NULL) {
@@ -755,6 +770,9 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
 
     ngx_conf_merge_value(conf->noverify, prev->noverify, 0);
+
+    ngx_conf_merge_bitmask_value(conf->methods, prev->methods,↲
+                         (NGX_CONF_BITMASK_SET|NGX_HTTP_GET));
 
     return NGX_CONF_OK;
 }
