@@ -448,16 +448,18 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
 
     while (*p != LF) {
         if (*p == '&' || *p == CR) {
-            rc = ngx_http_mogilefs_parse_param(r, &param);
+            if(param.len != 0) {
+                rc = ngx_http_mogilefs_parse_param(r, &param);
 
-            if(rc != NGX_OK) {
-                return rc;
+                if(rc != NGX_OK) {
+                    return rc;
+                }
+
+                p++;
+
+                param.data = p;
+                param.len = 0;
             }
-
-            p++;
-
-            param.data = p;
-            param.len = 0;
 
             if(*p == CR) {
                 break;
