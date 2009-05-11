@@ -58,7 +58,6 @@ static void *ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf);
 static char *ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent,
     void *child);
 static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
-static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 
 static char *
 ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -82,11 +81,11 @@ static ngx_http_mogilefs_cmd_t ngx_http_mogilefs_cmds[] = {
     {0,                                 ngx_null_string},
 };
 
-static ngx_conf_bitmask_t  ngx_http_mogilefs_methods_mask[] = {↲
-    { ngx_string("get"), NGX_HTTP_GET },↲
-    { ngx_string("put"), NGX_HTTP_PUT },↲
-    { ngx_string("delete"), NGX_HTTP_DELETE },↲
-    { ngx_null_string, 0 }↲
+static ngx_conf_bitmask_t  ngx_http_mogilefs_methods_mask[] = {
+    { ngx_string("get"), NGX_HTTP_GET },
+    { ngx_string("put"), NGX_HTTP_PUT },
+    { ngx_string("delete"), NGX_HTTP_DELETE },
+    { ngx_null_string, 0 }
 };
 
 static ngx_command_t  ngx_http_mogilefs_commands[] = {
@@ -140,11 +139,11 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       offsetof(ngx_http_mogilefs_loc_conf_t, noverify),
       NULL },
 
-    { ngx_string("mogilefs_methods"),↲
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,↲
-      ngx_conf_set_bitmask_slot,↲
-      NGX_HTTP_LOC_CONF_OFFSET,↲
-      offsetof(ngx_http_mogilefs_loc_conf_t, methods),↲
+    { ngx_string("mogilefs_methods"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+      ngx_conf_set_bitmask_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_mogilefs_loc_conf_t, methods),
       &ngx_http_mogilefs_methods_mask },
 
       ngx_null_command
@@ -200,7 +199,7 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    if (!(r->method & mgcf->methods)) {↲
+    if (!(r->method & mgcf->methods)) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -692,11 +691,6 @@ ngx_http_mogilefs_filter(void *data, ssize_t bytes)
     return NGX_OK;
 }
 
-static ngx_int_t
-ngx_http_mogilefs_header_filter(ngx_http_request_t *r) {
-    return NGX_OK;
-}
-
 static void *
 ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf)
 {
@@ -771,7 +765,7 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_value(conf->noverify, prev->noverify, 0);
 
-    ngx_conf_merge_bitmask_value(conf->methods, prev->methods,↲
+    ngx_conf_merge_bitmask_value(conf->methods, prev->methods,
                          (NGX_CONF_BITMASK_SET|NGX_HTTP_GET));
 
     return NGX_CONF_OK;
