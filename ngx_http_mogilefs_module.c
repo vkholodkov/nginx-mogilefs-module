@@ -784,6 +784,7 @@ ngx_http_mogilefs_create_loc_conf(ngx_conf_t *cf)
     conf->upstream.pass_request_body = 0;
 
     conf->noverify = NGX_CONF_UNSET;
+    conf->methods = NGX_HTTP_GET;
 
     return conf;
 }
