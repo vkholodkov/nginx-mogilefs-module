@@ -11,11 +11,14 @@
 typedef struct {
     ngx_int_t                status; 
     ngx_str_t                name;
+    ngx_flag_t               delete_ok;
 } ngx_http_mogilefs_error_t;
 
 typedef struct {
     ngx_uint_t               method; 
     ngx_str_t                name;
+    ngx_str_t                output_param;
+    ngx_str_t                output_count_param;
 } ngx_http_mogilefs_cmd_t;
 
 typedef struct {
@@ -31,6 +34,7 @@ typedef struct {
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
+    ngx_http_mogilefs_cmd_t  *cmd;
     ngx_array_t               sources; 
     ssize_t                   num_paths_returned;
 } ngx_http_mogilefs_ctx_t;
@@ -39,6 +43,8 @@ typedef struct {
     ssize_t                   priority;
     ngx_str_t                 path;
 } ngx_http_mogilefs_src_t;
+
+static ngx_int_t ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx);
 
 static ngx_int_t ngx_http_mogilefs_create_request(ngx_http_request_t *r);
 static ngx_int_t ngx_http_mogilefs_reinit_request(ngx_http_request_t *r);
@@ -65,20 +71,20 @@ static char *
 ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
-    {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key")},
-    {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found")},
-    {NGX_HTTP_BAD_REQUEST,              ngx_string("no_key")},
+    {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key"), 1},
+    {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found"), 0},
+    {NGX_HTTP_BAD_REQUEST,              ngx_string("no_key"), 0},
 
-    {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string},
+    {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string, 0},
 };
 
 static ngx_http_mogilefs_cmd_t ngx_http_mogilefs_cmds[] = {
-    {NGX_HTTP_GET,                      ngx_string("get_paths")},
-    {NGX_HTTP_HEAD,                     ngx_string("get_paths")},
-    {NGX_HTTP_PUT,                      ngx_string("create_open")},
-    {NGX_HTTP_DELETE,                   ngx_string("delete")},
+    {NGX_HTTP_GET,                      ngx_string("get_paths"),            ngx_string("path"),         ngx_string("paths") },
+    {NGX_HTTP_HEAD,                     ngx_string("get_paths"),            ngx_string("path_"),        ngx_string("dev_count") },
+    {NGX_HTTP_PUT,                      ngx_string("create_open"),          ngx_string("path_"),        ngx_string("dev_count") },
+    {NGX_HTTP_DELETE,                   ngx_string("delete"),               ngx_null_string,            ngx_null_string },
 
-    {0,                                 ngx_null_string},
+    {0,                                 ngx_null_string,                    ngx_null_string,            ngx_null_string },
 };
 
 static ngx_conf_bitmask_t  ngx_http_mogilefs_methods_mask[] = {
@@ -203,14 +209,21 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
         return NGX_HTTP_NOT_ALLOWED;
     }
 
-    rc = ngx_http_discard_request_body(r);
+    switch(r->method) {
+        case NGX_HTTP_GET:
+            if (ngx_http_set_content_type(r) != NGX_OK) {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
 
-    if (rc != NGX_OK) {
-        return rc;
-    }
+            /* fall through */
 
-    if (ngx_http_set_content_type(r) != NGX_OK) {
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        case NGX_HTTP_DELETE:
+            rc = ngx_http_discard_request_body(r);
+
+            if (rc != NGX_OK) {
+                return rc;
+            }
+            break;
     }
 
     u = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_t));
@@ -251,13 +264,17 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     u->input_filter = ngx_http_mogilefs_filter;
     u->input_filter_ctx = ctx;
 
+    if(ngx_http_mogilefs_set_cmd(r, ctx) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
     ngx_http_upstream_init(r);
 
     return NGX_DONE;
 }
 
 static ngx_int_t
-ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_str_t *cmd)
+ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx)
 {
     ngx_http_mogilefs_cmd_t *c;
 
@@ -271,7 +288,7 @@ ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_str_t *cmd)
     }
 
     if(c->name.data != NULL) {
-        *cmd = c->name;
+        ctx->cmd = c;
         return NGX_OK;
     }
 
@@ -289,6 +306,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     ngx_http_mogilefs_loc_conf_t   *mgcf;
     ngx_http_core_loc_conf_t       *clcf;
     ngx_str_t                       request;
+    ngx_http_mogilefs_ctx_t        *ctx;
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
@@ -318,9 +336,9 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         }
     }
 
-    if(ngx_http_mogilefs_set_cmd(r, &cmd) != NGX_OK) {
-        return NGX_ERROR;
-    }
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    cmd = ctx->cmd->name;
 
     escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
     escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
@@ -456,6 +474,20 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
     /*
+     * Convert ok response to delete into No content
+     */
+    if(ctx->cmd->method & NGX_HTTP_DELETE) {
+        r->headers_out.content_length_n = 0;
+        u->headers_in.status_n = NGX_HTTP_NO_CONTENT;
+        u->state->status = NGX_HTTP_NO_CONTENT;
+
+        // Return no content
+        u->buffer.pos = u->buffer.pos;
+
+        return NGX_OK;
+    }
+
+    /*
      * If no paths retuned, but response was ok, tell the client it's unavailable
      */
     if(ctx->num_paths_returned <= 0 || ctx->sources.nelts == 0)
@@ -537,6 +569,7 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
     ngx_http_upstream_t *u, ngx_str_t *line)
 {
     ngx_http_mogilefs_error_t *e;
+    ngx_http_mogilefs_ctx_t   *ctx;
 
     line->data += sizeof("ERR ") - 1;
     line->len -= sizeof("ERR ") - 1;
@@ -554,6 +587,22 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
         }
 
         e++;
+    }
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    /*
+     * Convert unknown_key response to delete into No content
+     */
+    if(ctx->cmd->method & NGX_HTTP_DELETE && e->delete_ok) {
+        r->headers_out.content_length_n = 0;
+        u->headers_in.status_n = NGX_HTTP_NO_CONTENT;
+        u->state->status = NGX_HTTP_NO_CONTENT;
+
+        // Return no content
+        u->buffer.pos = u->buffer.pos;
+
+        return NGX_OK;
     }
 
     r->headers_out.content_length_n = 0;
@@ -599,9 +648,9 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
-    if(name.len >= sizeof("path") - 1
-        && ngx_strncmp(name.data, "path", sizeof("path") - 1) == 0
-        && ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1) != NGX_ERROR)
+    if(name.len >= ctx->cmd->output_param.len
+        && ngx_strncmp(name.data, ctx->cmd->output_param.data, ctx->cmd->output_param.len) == 0
+        && ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len + 2) != NGX_ERROR)
     {
         source = ngx_array_push(&ctx->sources);
 
@@ -609,11 +658,11 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
             return NGX_ERROR;
         }
 
-        source->priority = ngx_atoi(name.data + sizeof("path") - 1, name.len - sizeof("path") + 1);
+        source->priority = ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len + 2);
         source->path = value;
     }
-    else if(name.len == sizeof("paths") - 1 &&
-        ngx_strncmp(name.data, "paths", sizeof("paths") - 1) == 0)
+    else if(name.len == ctx->cmd->output_count_param.len &&
+        ngx_strncmp(name.data, ctx->cmd->output_count_param.data, ctx->cmd->output_count_param.len) == 0)
     {
         ctx->num_paths_returned = ngx_atoi(value.data, value.len);
     }
