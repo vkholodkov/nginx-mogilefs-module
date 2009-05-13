@@ -28,6 +28,8 @@ typedef struct {
     ngx_array_t                *key_values;
     ngx_int_t                  index;
     ngx_http_upstream_conf_t   upstream;
+    ngx_array_t                *tracker_lengths;
+    ngx_array_t                *tracker_values;
     ngx_str_t                  domain;
     ngx_str_t                  fetch_location;
     ngx_flag_t                 noverify;
@@ -44,6 +46,7 @@ typedef struct {
     ngx_str_t                 path;
 } ngx_http_mogilefs_src_t;
 
+static ngx_int_t ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf);
 static ngx_int_t ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx);
 
 static ngx_int_t ngx_http_mogilefs_create_request(ngx_http_request_t *r);
@@ -264,6 +267,12 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     u->input_filter = ngx_http_mogilefs_filter;
     u->input_filter_ctx = ctx;
 
+    if (mgcf->tracker_lengths != 0) {
+        if (ngx_http_mogilefs_eval_tracker(r, mgcf) != NGX_OK) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+    }
+
     if(ngx_http_mogilefs_set_cmd(r, ctx) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -271,6 +280,32 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     ngx_http_upstream_init(r);
 
     return NGX_DONE;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf)
+{
+    ngx_str_t             tracker;
+    ngx_http_upstream_t  *u;
+
+    if (ngx_http_script_run(r, &tracker, mgcf->tracker_lengths->elts, 0,
+                            mgcf->tracker_values->elts)
+        == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    u = r->upstream;
+
+    u->resolved = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_resolved_t));
+    if (u->resolved == NULL) {
+        return NGX_ERROR;
+    }
+
+    u->resolved->host = tracker;
+    u->resolved->no_port = 1;
+
+    return NGX_OK;
 }
 
 static ngx_int_t
@@ -871,12 +906,34 @@ ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf
     ngx_http_mogilefs_loc_conf_t    *mgcf = conf;
     ngx_str_t                       *value;
     ngx_url_t                        u;
+    ngx_uint_t                       n;
+    ngx_http_script_compile_t        sc;
 
-    if (mgcf->upstream.upstream) {
+    if (mgcf->upstream.upstream || mgcf->tracker_lengths) {
         return "is duplicate";
     }
 
     value = cf->args->elts;
+
+    n = ngx_http_script_variables_count(&value[1]);
+
+    if(n) { 
+        ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
+
+        sc.cf = cf;
+        sc.source = &value[1];
+        sc.lengths = &mgcf->tracker_lengths;
+        sc.values = &mgcf->tracker_values;
+        sc.variables = n;
+        sc.complete_lengths = 1;
+        sc.complete_values = 1;
+
+        if (ngx_http_script_compile(&sc) != NGX_OK) {
+            return NGX_CONF_ERROR;
+        }
+
+        return NGX_CONF_OK;
+    }
 
     ngx_memzero(&u, sizeof(ngx_url_t));
 
@@ -914,7 +971,7 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (pmgcf->upstream.upstream == 0) {
+    if (pmgcf->upstream.upstream == 0 && pmgcf->tracker_lengths == NULL) {
         return "no tracker defined";
     }
 
