@@ -8,6 +8,12 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+typedef enum {
+    NGX_MOGILEFS_MAIN,
+    NGX_MOGILEFS_CREATE_OPEN,
+    NGX_MOGILEFS_CREATE_CLOSE,
+} ngx_http_mogilefs_spare_location_type_t;
+
 typedef struct {
     ngx_int_t                status; 
     ngx_str_t                name;
@@ -33,6 +39,9 @@ typedef struct {
     ngx_str_t                  domain;
     ngx_str_t                  fetch_location;
     ngx_flag_t                 noverify;
+    ngx_http_mogilefs_spare_location_type_t spare_location_type;
+    ngx_str_t                  create_open_spare_location;
+    ngx_str_t                  create_close_spare_location;
 } ngx_http_mogilefs_loc_conf_t;
 
 typedef struct {
@@ -41,10 +50,26 @@ typedef struct {
     ssize_t                   num_paths_returned;
 } ngx_http_mogilefs_ctx_t;
 
+typedef enum {
+    START,
+    CREATE_OPEN,
+    FETCH,
+    CREATE_CLOSE,
+} ngx_http_mogilefs_put_state_t;
+
+typedef struct {
+    ngx_http_post_subrequest_t      *psr;
+    ngx_http_mogilefs_put_state_t    state;
+    ngx_uint_t                       status;
+} ngx_http_mogilefs_put_ctx_t;
+
 typedef struct {
     ssize_t                   priority;
     ngx_str_t                 path;
 } ngx_http_mogilefs_src_t;
+
+static ngx_int_t ngx_http_mogilefs_put_handler(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf);
+static ngx_int_t ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_int_t rc);
 
 static ngx_int_t ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf);
 static ngx_int_t ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx);
@@ -227,6 +252,11 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
                 return rc;
             }
             break;
+        case NGX_HTTP_PUT:
+            if(mgcf->spare_location_type == NGX_MOGILEFS_MAIN) {
+                return ngx_http_mogilefs_put_handler(r, mgcf);
+            }
+            break;
     }
 
     u = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_t));
@@ -280,6 +310,86 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     ngx_http_upstream_init(r);
 
     return NGX_DONE;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_put_handler(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf)
+{
+    ngx_http_mogilefs_put_ctx_t        *ctx;
+    ngx_str_t                           args; 
+    ngx_uint_t                          flags;
+    ngx_http_request_t                 *sr; 
+    ngx_str_t                           spare_location = ngx_null_string, uri;
+    ngx_int_t                           rc;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    if(ctx == NULL) {
+        ctx = ngx_palloc(r->pool, sizeof(ngx_http_mogilefs_put_ctx_t));
+        if (ctx == NULL) {
+            return NGX_ERROR;
+        }
+
+        ctx->state = START;
+
+        ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
+    }
+
+    if(ctx->psr == NULL) {
+        ctx->psr = ngx_palloc(r->pool, sizeof(ngx_http_post_subrequest_t));
+        if (ctx->psr == NULL) {
+            return NGX_ERROR;
+        }
+    }
+
+    switch(ctx->state) {
+        case START:
+            spare_location = mgcf->create_open_spare_location;
+            ctx->state = CREATE_OPEN;
+            break;
+        case CREATE_OPEN:
+            spare_location = mgcf->fetch_location;
+            ctx->state = FETCH;
+            break;
+        case FETCH:
+            spare_location = mgcf->create_close_spare_location;
+            ctx->state = CREATE_CLOSE;
+            break;
+        case CREATE_CLOSE:
+            return ctx->status;
+    }
+
+    uri = spare_location;
+
+    args.len = 0;
+    args.data = NULL;
+    flags = 0;
+
+    if (ngx_http_parse_unsafe_uri(r, &uri, &args, &flags) != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    ctx->psr->handler = ngx_http_mogilefs_finish_phase_handler;
+    ctx->psr->data = ctx;
+
+    flags |= NGX_HTTP_SUBREQUEST_WAITED;
+
+    rc = ngx_http_subrequest(r, &uri, &args, &sr, ctx->psr, flags);
+
+    if (rc == NGX_ERROR || rc == NGX_DONE) {
+        return rc;
+    } 
+
+    /*
+     * Wait for subrequest to complete
+     */
+    return NGX_AGAIN;
+}
+
+static ngx_int_t
+ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_int_t rc)
+{
+    return rc;
 }
 
 static ngx_int_t
