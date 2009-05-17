@@ -978,7 +978,7 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
     }
     else if(name.len >= ctx->cmd->output_param.len
         && ngx_strncmp(name.data, ctx->cmd->output_param.data, ctx->cmd->output_param.len) == 0
-        && ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len + 2) != NGX_ERROR)
+        && ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len) != NGX_ERROR)
     {
         source = ngx_array_push(&ctx->sources);
 
@@ -986,7 +986,7 @@ ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param) {
             return NGX_ERROR;
         }
 
-        source->priority = ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len + 2);
+        source->priority = ngx_atoi(name.data + ctx->cmd->output_param.len, name.len - ctx->cmd->output_param.len);
         source->path = value;
     }
     else if(name.len == ctx->cmd->output_count_param.len &&
