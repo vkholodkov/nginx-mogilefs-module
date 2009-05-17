@@ -54,6 +54,7 @@ typedef struct {
     ngx_array_t               sources; 
     ssize_t                   num_paths_returned;
     ngx_array_t              *aux_params;
+    ngx_str_t                 key;
 } ngx_http_mogilefs_ctx_t;
 
 typedef enum {
@@ -68,6 +69,7 @@ typedef struct {
     ngx_http_mogilefs_put_state_t    state;
     ngx_uint_t                       status;
     ngx_http_mogilefs_ctx_t         *create_open_ctx;
+    ngx_str_t                        key;
 } ngx_http_mogilefs_put_ctx_t;
 
 typedef struct {
@@ -75,6 +77,7 @@ typedef struct {
     ngx_str_t                 path;
 } ngx_http_mogilefs_src_t;
 
+static ngx_int_t ngx_http_mogilefs_eval_key(ngx_http_request_t *r, ngx_str_t *key);
 static ngx_int_t ngx_http_mogilefs_put_handler(ngx_http_request_t *r);
 static ngx_int_t ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_int_t rc);
 
@@ -309,6 +312,10 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 
         ngx_array_init(&ctx->sources, r->pool, 1, sizeof(ngx_http_mogilefs_src_t));
 
+        if(ngx_http_mogilefs_eval_key(r, &ctx->key) != NGX_OK) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
         ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
     }
 
@@ -377,6 +384,10 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
         ctx->status = 0;
         ctx->create_open_ctx = NULL;
 
+        if(ngx_http_mogilefs_eval_key(r, &ctx->key) != NGX_OK) {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
         ngx_http_set_ctx(r, ctx, ngx_http_mogilefs_module);
     }
 
@@ -424,13 +435,13 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
             return ngx_http_send_header(r);
     }
 
-    uri.len = spare_location.len + r->uri.len;
+    uri.len = spare_location.len + ctx->key.len;
 
     uri.data = ngx_palloc(r->pool, uri.len);
 
     p = ngx_cpymem(uri.data, spare_location.data, spare_location.len);
 
-    p = ngx_cpymem(p, r->uri.data, r->uri.len);
+    p = ngx_cpymem(p, ctx->key.data, ctx->key.len);
 
     args.len = 0;
     args.data = NULL;
@@ -505,6 +516,43 @@ ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf
 }
 
 static ngx_int_t
+ngx_http_mogilefs_eval_key(ngx_http_request_t *r, ngx_str_t *key)
+{
+    size_t                          loc_len;
+    ngx_http_mogilefs_loc_conf_t   *mgcf;
+    ngx_http_core_loc_conf_t       *clcf;
+
+    mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
+    /*
+     * If key is empty take the remaining part of request URI,
+     * otherwise run script to obtain key
+     */
+    if(mgcf->key.len == 0) {
+        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+
+        loc_len = r->valid_location ? clcf->name.len : 0;
+
+        key->data = r->uri.data + loc_len;
+        key->len = r->uri.len - loc_len;
+    }
+    else {
+        if(mgcf->key_lengths != NULL) {
+            if (ngx_http_script_run(r, key, mgcf->key_lengths->elts, 0,
+                                    mgcf->key_values->elts)
+                == NULL)
+            {
+                return NGX_ERROR;
+            }
+        }
+        else {
+            *key = mgcf->key;
+        }
+    }
+
+    return NGX_OK;
+}
+
+static ngx_int_t
 ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx)
 {
     ngx_http_mogilefs_cmd_t *c;
@@ -529,45 +577,18 @@ ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx)
 static ngx_int_t
 ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 {
-    size_t                          len, loc_len;
+    size_t                          len;
     uintptr_t                       escape_domain, escape_key;
-    ngx_str_t                       cmd, key;
+    ngx_str_t                       cmd;
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
-    ngx_http_core_loc_conf_t       *clcf;
     ngx_str_t                       request;
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_aux_param_t  *a;
     ngx_uint_t                      i;
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
-
-    /*
-     * If key is empty take the remaining part of request URI,
-     * otherwise run script to obtain key
-     */
-    if(mgcf->key.len == 0) {
-        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-
-        loc_len = r->valid_location ? clcf->name.len : 0;
-
-        key.data = r->uri.data + loc_len;
-        key.len = r->uri.len - loc_len;
-    }
-    else {
-        if(mgcf->key_lengths != NULL) {
-            if (ngx_http_script_run(r, &key, mgcf->key_lengths->elts, 0,
-                                    mgcf->key_values->elts)
-                == NULL)
-            {
-                return NGX_ERROR;
-            }
-        }
-        else {
-            key = mgcf->key;
-        }
-    }
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
@@ -578,14 +599,14 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         cmd.len = sizeof("create_close") - 1;
     }
 
-    if(key.len == 0) {
+    if(ctx->key.len == 0) {
         return NGX_HTTP_BAD_REQUEST;
     }
 
     escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
-    escape_key = 2 * ngx_escape_uri(NULL, key.data, key.len, NGX_ESCAPE_MEMCACHED);
+    escape_key = 2 * ngx_escape_uri(NULL, ctx->key.data, ctx->key.len, NGX_ESCAPE_MEMCACHED);
 
-    len = cmd.len + 1 + sizeof("key=") - 1 + key.len + escape_key + 1 +
+    len = cmd.len + 1 + sizeof("key=") - 1 + ctx->key.len + escape_key + 1 +
         sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1 +
         (mgcf->noverify ? 1 + sizeof("noverify=1") - 1 : 0);
 
@@ -618,10 +639,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     b->last = ngx_copy(b->last, "key=", sizeof("key=") - 1);
 
     if (escape_key == 0) {
-        b->last = ngx_copy(b->last, key.data, key.len);
+        b->last = ngx_copy(b->last, ctx->key.data, ctx->key.len);
 
     } else {
-        b->last = (u_char *) ngx_escape_uri(b->last, key.data, key.len,
+        b->last = (u_char *) ngx_escape_uri(b->last, ctx->key.data, ctx->key.len,
                                             NGX_ESCAPE_MEMCACHED);
     }
 
@@ -1282,7 +1303,7 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
         clcf->handler = ngx_http_mogilefs_handler;
     }
 
-    name->len = sizeof("/mogstored_spare_") - 1 + NGX_OFF_T_LEN;
+    name->len = sizeof("/mogstored_spare_") - 1 + NGX_OFF_T_LEN + 1;
 
     name->data = ngx_palloc(cf->pool, name->len);
 
@@ -1290,7 +1311,7 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
         return NGX_CONF_ERROR;
     }
 
-    name->len = ngx_sprintf(name->data, "/mogstored_spare_%O", (off_t)(uintptr_t)clcf) - name->data;
+    name->len = ngx_sprintf(name->data, "/mogstored_spare_%O/", (off_t)(uintptr_t)clcf) - name->data;
 
     clcf->loc_conf = ctx->loc_conf;
     clcf->name = *name;
