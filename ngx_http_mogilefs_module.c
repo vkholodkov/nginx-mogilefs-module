@@ -13,7 +13,7 @@ typedef enum {
     NGX_MOGILEFS_CREATE_OPEN,
     NGX_MOGILEFS_CREATE_CLOSE,
     NGX_MOGILEFS_FETCH,
-} ngx_http_mogilefs_spare_location_type_t;
+} ngx_http_mogilefs_location_type_t;
 
 typedef struct {
     ngx_int_t                status; 
@@ -40,7 +40,7 @@ typedef struct {
     ngx_str_t                  domain;
     ngx_str_t                  fetch_location;
     ngx_flag_t                 noverify;
-    ngx_http_mogilefs_spare_location_type_t spare_location_type;
+    ngx_http_mogilefs_location_type_t location_type;
     ngx_str_t                  create_open_spare_location;
     ngx_str_t                  create_close_spare_location;
 } ngx_http_mogilefs_loc_conf_t;
@@ -247,7 +247,7 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    if (mgcf->spare_location_type == NGX_MOGILEFS_MAIN) {
+    if (mgcf->location_type == NGX_MOGILEFS_MAIN) {
         if(!(r->method & mgcf->methods)) {
             return NGX_HTTP_NOT_ALLOWED;
         }
@@ -367,7 +367,7 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    if (mgcf->spare_location_type == NGX_MOGILEFS_MAIN && !(r->method & mgcf->methods)) {
+    if (mgcf->location_type == NGX_MOGILEFS_MAIN && !(r->method & mgcf->methods)) {
         return NGX_DECLINED;
     }
 
@@ -594,7 +594,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
 
     cmd = ctx->cmd->name;
 
-    if(mgcf->spare_location_type == NGX_MOGILEFS_CREATE_CLOSE && ctx->cmd->method & NGX_HTTP_PUT) {
+    if(mgcf->location_type == NGX_MOGILEFS_CREATE_CLOSE && ctx->cmd->method & NGX_HTTP_PUT) {
         cmd.data = (u_char*)"create_close";
         cmd.len = sizeof("create_close") - 1;
     }
@@ -1235,7 +1235,7 @@ ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf
 
 static char*
 ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **octx, ngx_str_t *name,
-    ngx_http_mogilefs_spare_location_type_t spare_location_type)
+    ngx_http_mogilefs_location_type_t location_type)
 {
     ngx_http_mogilefs_loc_conf_t *mgcf, *pmgcf;
     ngx_http_conf_ctx_t       *ctx, *pctx = cf->ctx;
@@ -1283,9 +1283,9 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
 
     mgcf = ctx->loc_conf[ngx_http_mogilefs_module.ctx_index];
 
-    mgcf->spare_location_type = spare_location_type;
+    mgcf->location_type = location_type;
 
-    if(spare_location_type != NGX_MOGILEFS_FETCH) {
+    if(location_type != NGX_MOGILEFS_FETCH) {
         pmgcf = pctx->loc_conf[ngx_http_mogilefs_module.ctx_index];
 
         mgcf->methods = NGX_HTTP_PUT;
@@ -1383,7 +1383,7 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return rc;
     }
 
-    pmgcf->spare_location_type = NGX_MOGILEFS_MAIN;
+    pmgcf->location_type = NGX_MOGILEFS_MAIN;
 
     pclcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     pclcf->handler = ngx_http_mogilefs_handler;
