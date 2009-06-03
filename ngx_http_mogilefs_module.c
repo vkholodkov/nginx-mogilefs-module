@@ -360,14 +360,18 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
     ngx_str_t                           spare_location = ngx_null_string, uri;
     ngx_int_t                           rc;
     u_char                             *p;
+    ngx_http_core_loc_conf_t           *clcf;
     ngx_http_mogilefs_loc_conf_t       *mgcf;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs put handler");
 
+    clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
-    if (mgcf->location_type == NGX_MOGILEFS_MAIN && !(r->method & mgcf->methods)) {
+    if (clcf->handler != ngx_http_mogilefs_handler ||
+        (mgcf->location_type == NGX_MOGILEFS_MAIN && !(r->method & mgcf->methods)))
+    {
         return NGX_DECLINED;
     }
 
