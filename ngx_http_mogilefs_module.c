@@ -28,7 +28,8 @@ typedef struct {
     ngx_str_t                output_count_param;
 } ngx_http_mogilefs_cmd_t;
 
-typedef struct {
+typedef struct ngx_http_mogilefs_loc_conf_s {
+    struct ngx_http_mogilefs_loc_conf_s *parent;
     ngx_uint_t                 methods;
     ngx_str_t                  key;
     ngx_array_t                *key_lengths;
@@ -587,7 +588,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
-    ngx_str_t                       request;
+    ngx_str_t                       request, domain;
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_aux_param_t  *a;
     ngx_uint_t                      i;
@@ -607,11 +608,20 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         return NGX_HTTP_BAD_REQUEST;
     }
 
-    escape_domain = 2 * ngx_escape_uri(NULL, mgcf->domain.data, mgcf->domain.len, NGX_ESCAPE_MEMCACHED);
+    if(mgcf->parent != NULL) {
+        domain.len = mgcf->parent->domain.len;
+        domain.data = mgcf->parent->domain.data;
+    }
+    else {
+        domain.len = mgcf->domain.len;
+        domain.data = mgcf->domain.data;
+    }
+
+    escape_domain = 2 * ngx_escape_uri(NULL, domain.data, domain.len, NGX_ESCAPE_MEMCACHED);
     escape_key = 2 * ngx_escape_uri(NULL, ctx->key.data, ctx->key.len, NGX_ESCAPE_MEMCACHED);
 
     len = cmd.len + 1 + sizeof("key=") - 1 + ctx->key.len + escape_key + 1 +
-        sizeof("domain=") - 1 + mgcf->domain.len + escape_domain + sizeof(CRLF) - 1 +
+        sizeof("domain=") - 1 + domain.len + escape_domain + sizeof(CRLF) - 1 +
         (mgcf->noverify ? 1 + sizeof("noverify=1") - 1 : 0);
 
     if(ctx->aux_params != NULL && ctx->aux_params->nelts) {
@@ -655,10 +665,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     b->last = ngx_copy(b->last, "domain=", sizeof("domain=") - 1);
 
     if (escape_domain == 0) {
-        b->last = ngx_copy(b->last, mgcf->domain.data, mgcf->domain.len);
+        b->last = ngx_copy(b->last, domain.data, domain.len);
 
     } else {
-        b->last = (u_char *) ngx_escape_uri(b->last, mgcf->domain.data, mgcf->domain.len,
+        b->last = (u_char *) ngx_escape_uri(b->last, domain.data, domain.len,
                                             NGX_ESCAPE_MEMCACHED);
     }
 
@@ -1299,6 +1309,8 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
          */
         mgcf->tracker_lengths = pmgcf->tracker_lengths;
         mgcf->tracker_values = pmgcf->tracker_values;
+
+        mgcf->parent = pmgcf;
 
         ngx_memcpy(&mgcf->upstream, &pmgcf->upstream, sizeof(ngx_http_upstream_conf_t));
 
