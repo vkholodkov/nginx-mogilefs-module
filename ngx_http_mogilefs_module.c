@@ -344,6 +344,9 @@ ngx_http_mogilefs_body_handler(ngx_http_request_t *r)
 {
     ngx_int_t                           rc;
 
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "mogilefs body handler");
+
     rc = ngx_http_mogilefs_put_handler(r);
 
     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
@@ -410,6 +413,11 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
             return rc;
         }
 
+        return NGX_DONE;
+    }
+
+    // Still receiving body?
+    if(r->request_body->rest) {
         return NGX_DONE;
     }
 
