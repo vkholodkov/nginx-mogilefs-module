@@ -3,13 +3,13 @@
 -->
 <html>
 	<head>
-		<title>Nginx mogilefs module (v 1.0.1)</title>
+		<title>Nginx mogilefs module (v 1.0.2)</title>
 	</head>
 	<body>
         <table align="center" width="100%">
             <tr>
                 <td align="left">
-                    <h2>Nginx mogilefs module (v 1.0.1)</h2>
+                    <h2>Nginx mogilefs module (v 1.0.2)</h2>
                 </td>
                 <td align="right">
                     <a href="mogilefs.ru.html">rus</a> eng
@@ -39,8 +39,10 @@
         </pre>
         <p>The variable $mogilefs_path contains absolute URL to the file on storage node. The fetch block creates a hidden internal location with the name /mogilefs_fetch_XXXXXXXX, where redirected will be performed after successful tracker response.</p>
 		<hr>
-		<a name="mogilefs_domain"></a><strong>syntax: </strong>mogilefs_domain <strong><em>&lt;domain&gt;</em></strong><br><strong>default: </strong>default<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies the name of MogileFS domain to query.</p><hr>
+		<a name="mogilefs_methods"></a><strong>syntax: </strong>mogilefs_methods <strong><em>&lt;[[method 1] method 2 ... ]&gt;</em></strong><br><strong>default: </strong>GET<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies which methods will be allowed to access MogileFS. GET retrieves a resource from MogileFS, PUT creates or replaces, DELETE deletes a resource in MogileFS.</p><hr>
+		<a name="mogilefs_domain"></a><strong>syntax: </strong>mogilefs_domain <strong><em>&lt;domain&gt;</em></strong><br><strong>default: </strong>default<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies the name of MogileFS domain to query. The specification may contain variables.</p><hr>
 		<a name="mogilefs_tracker"></a><strong>syntax: </strong>mogilefs_tracker <strong><em>&lt;IP|IP:port|upstream&gt;</em></strong><br><strong>default: </strong>none<br><strong>severity: </strong>mandatory<br><strong>context: </strong>main, server, location<br><p>Specifies address of MogileFS tracker to query.</p><hr>
+		<a name="mogilefs_noverify"></a><strong>syntax: </strong>mogilefs_noverify <strong><em>&lt;on/off&gt;</em></strong><br><strong>default: </strong>off<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Enables sending of <i>noverify</i> argument to MogileFS.</p><hr>
 		<a name="mogilefs_connect_timeout"></a><strong>syntax: </strong>mogilefs_connect_timeout <strong><em>&lt;time&gt;</em></strong><br><strong>default: </strong>60s<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies a timeout to be used to connect to mogilefs tracker.  Could not be longer than 75 seconds.</p><hr>
 		<a name="mogilefs_send_timeout"></a><strong>syntax: </strong>mogilefs_send_timeout <strong><em>&lt;time&gt;</em></strong><br><strong>default: </strong>60s<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies a timeout to be used to send data to mogilefs tracker. If no data will be received by mogilefs tracker during this time interval, nginx will close the connection.</p><hr>
 		<a name="mogilefs_read_timeout"></a><strong>syntax: </strong>mogilefs_read_timeout <strong><em>&lt;time&gt;</em></strong><br><strong>default: </strong>60s<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies a timeout to be used to receive data from mogilefs tracker. If no data will be send by mogilefs tracker during this time interval, nginx will close the connection.</p><hr>
@@ -73,19 +75,19 @@ http {
     }
 }
         </pre>
-		<a name="requirementa"><h2>Requirements</h2>
+		<a name="requirements"><h2>Requirements</h2>
 		<p>nginx 0.7.1 or above is required to compile this module.</p>
 		<a name="download"><h2>Download</h2>
-		<p>Latest version 1.0.1: <br/>
+		<p>Latest version 1.0.2: <br/>
         <table border="1">
             <tr>
                 <td>File</td><td>MD5</td><td>SHA1</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.1.tar.gz">nginx_mogilefs_module-1.0.1.tar.gz</a></td><td>c45947ec9aebe83398d4c9604e843023</td><td>15e4e8ed3a27c0ac2bd01796166e0ea33d787e48</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.tar.gz">nginx_mogilefs_module-1.0.2.tar.gz</a></td><td>c45947ec9aebe83398d4c9604e843023</td><td>15e4e8ed3a27c0ac2bd01796166e0ea33d787e48</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.1.zip">nginx_mogilefs_module-1.0.1.zip</a></td><td>6dcd471424c4d98d94220297931e5273</td><td>263d5fe6c13c8e4650f8fe5d035dc985f6da4121</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.zip">nginx_mogilefs_module-1.0.2.zip</a></td><td>6dcd471424c4d98d94220297931e5273</td><td>263d5fe6c13c8e4650f8fe5d035dc985f6da4121</td>
             </tr>
         </table>
         or go to <a href="download">download area</a>
@@ -95,7 +97,7 @@ http {
 		<a name="usage"><h2>How to use</h2>
 		<p>Download sources from one of the links above. Unpack the archive: </p>
 		<pre>
-tar xvzf nginx_mogilefs_module-1.0.1.tar.gz</pre>
+tar xvzf nginx_mogilefs_module-1.0.2.tar.gz</pre>
 		<p>Configure nginx with additional module: </p>
 		<pre>
 cd &lt;path to nginx sources&gt;

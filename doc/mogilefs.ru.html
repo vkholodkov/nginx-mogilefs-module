@@ -3,13 +3,13 @@
 -->
 <html>
 	<head>
-		<title>Nginx mogilefs module (v 1.0.1)</title>
+		<title>Nginx mogilefs module (v 1.0.2)</title>
 	</head>
 	<body>
         <table align="center" width="100%">
             <tr>
                 <td align="left">
-                    <h2>Nginx mogilefs module (v 1.0.1)</h2>
+                    <h2>Nginx mogilefs module (v 1.0.2)</h2>
                 </td>
                 <td align="right">
                     rus <a href="mogilefs.en.html">eng</a>
@@ -40,7 +40,9 @@
         <p>Переменная $mogilefs_path содержит абсолютный URL к файлу на узле хранения. Блок выборки создает скрытый внутренний location с именем /mogilefs_fetch_XXXXXXXX, на который выполняется перенаправление после успешного ответа трэкера.</p>
 		<hr>
 		<a name="mogilefs_domain"></a><strong>синтаксис: </strong>mogilefs_domain <strong><em>&lt;домен&gt;</em></strong><br><strong>значение по-умолчанию: </strong>default<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает домен MogileFS который будет запрошен у трэкера.</p><hr>
-		<a name="mogilefs_tracker"></a><strong>синтаксис: </strong>mogilefs_tracker <strong><em>&lt;IP|IP:порт|upstream&gt;</em></strong><br><strong>значение по-умолчанию: </strong>none<br><strong>строгость: </strong>обязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает адрес или имя upstream-а MogileFS трэкера.</p><hr>
+		<a name="mogilefs_methods"></a><strong>синтаксис: </strong>mogilefs_methods <strong><em>&lt;[[метод 1] метод 2 ... ]&gt;</em></strong><br><strong>значение по-умолчанию: </strong>GET<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Указывает методы, которые будут разрешены при запросе к MogileFS. При запросе методом GET выполняется получение ресурса из MogileFS, при запросе методом PUT выполняется создание или замена, при запросе методом DELETE выполняется удаление ресурса в MogileFS.</p><hr>
+		<a name="mogilefs_tracker"></a><strong>синтаксис: </strong>mogilefs_tracker <strong><em>&lt;IP|IP:порт|upstream&gt;</em></strong><br><strong>значение по-умолчанию: </strong>none<br><strong>строгость: </strong>обязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает адрес или имя upstream-а MogileFS трэкера. Может содержать переменные.</p><hr>
+		<a name="mogilefs_noverify"></a><strong>синтаксис: </strong>mogilefs_noverify <strong><em>&lt;on/off&gt;</em></strong><br><strong>значение по-умолчанию: </strong>off<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Разрешает отправку параметра <i>noverify</i> MogileFS.</p><hr>
 		<a name="mogilefs_connect_timeout"></a><strong>синтаксис: </strong>mogilefs_connect_timeout <strong><em>&lt;время&gt;</em></strong><br><strong>значение по-умолчанию: </strong>60s<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает таймаут на соединение с MogileFS трэкером. Не может быть длинее 75 секунд.</p><hr>
 		<a name="mogilefs_send_timeout"></a><strong>синтаксис: </strong>mogilefs_send_timeout <strong><em>&lt;время&gt;</em></strong><br><strong>значение по-умолчанию: </strong>60s<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Директива задаёт таймаут на передачу запроса MogileFS трэкеру. Таймаут устанавливается не на всю передачу запроса, а только между двумя операциями записи. Если по истечении этого времени трэкер не примет новых данных, то nginx закрывает соединение. </p><hr>
 		<a name="mogilefs_read_timeout"></a><strong>синтаксис: </strong>mogilefs_read_timeout <strong><em>&lt;время&gt;</em></strong><br><strong>значение по-умолчанию: </strong>60s<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Директива задаёт таймаут на чтении ответа от MogileFS трэкера. Таймаут устанавливается не на всю передачу ответа, а только между двумя операциями чтения. Если по истечении этого времени трэкер ничего не передаст, то nginx закрывает соединение. </p><hr>
@@ -73,19 +75,19 @@ http {
     }
 }
         </pre>
-		<a name="requirementa"><h2>Системные требования</h2>
+		<a name="requirements"><h2>Системные требования</h2>
 		<p>Для сборки модуля требуется nginx 0.7.1 и старше.</p>
 		<a name="download"><h2>Скачать</h2>
-		<p>Последняя версия 1.0.1: <br/>
+		<p>Последняя версия 1.0.2: <br/>
         <table border="1">
             <tr>
                 <td>Файл</td><td>MD5</td><td>SHA1</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.1.tar.gz">nginx_mogilefs_module-1.0.1.tar.gz</a></td><td>c45947ec9aebe83398d4c9604e843023</td><td>15e4e8ed3a27c0ac2bd01796166e0ea33d787e48</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.tar.gz">nginx_mogilefs_module-1.0.2.tar.gz</a></td><td>c45947ec9aebe83398d4c9604e843023</td><td>15e4e8ed3a27c0ac2bd01796166e0ea33d787e48</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.1.zip">nginx_mogilefs_module-1.0.1.zip</a></td><td>6dcd471424c4d98d94220297931e5273</td><td>263d5fe6c13c8e4650f8fe5d035dc985f6da4121</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.zip">nginx_mogilefs_module-1.0.2.zip</a></td><td>6dcd471424c4d98d94220297931e5273</td><td>263d5fe6c13c8e4650f8fe5d035dc985f6da4121</td>
             </tr>
         </table>
         или перейти в <a href="download">каталог загрузки</a>
@@ -95,7 +97,7 @@ http {
 		<a name="usage"><h2>Как использовать</h2>
 		<p>Скачать исходники по одной из ссылок выше. Распаковать архив: </p>
 		<pre>
-tar xvzf nginx_mogilefs_module-1.0.1.tar.gz</pre>
+tar xvzf nginx_mogilefs_module-1.0.2.tar.gz</pre>
 		<p>Сконфигурировать nginx с дополнительным модулем: </p>
 		<pre>
 cd &lt;путь к исходникам nginx&gt;
