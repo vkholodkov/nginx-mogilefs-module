@@ -1,0 +1,5 @@
+
+Version 1.0.2
+ * Added feature: directive mogilefs_methods and support for PUT and DELETE methods
+ * Added feature: dynamic evaluation of tracker name
+ * Added feature: ability to pass noverify parameter to tracker
