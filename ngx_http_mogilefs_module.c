@@ -28,6 +28,12 @@ typedef struct {
     ngx_str_t                output_count_param;
 } ngx_http_mogilefs_cmd_t;
 
+typedef struct {
+    ngx_str_t                   source;
+    ngx_array_t                *lengths;
+    ngx_array_t                *values;
+} ngx_http_mogilefs_class_template_t;
+
 typedef struct ngx_http_mogilefs_loc_conf_s {
     struct ngx_http_mogilefs_loc_conf_s *parent;
     ngx_uint_t                 methods;
@@ -39,6 +45,7 @@ typedef struct ngx_http_mogilefs_loc_conf_s {
     ngx_array_t                *tracker_lengths;
     ngx_array_t                *tracker_values;
     ngx_str_t                  domain;
+    ngx_array_t                *class_templates;
     ngx_str_t                  fetch_location;
     ngx_flag_t                 noverify;
     ngx_http_mogilefs_location_type_t location_type;
@@ -78,11 +85,12 @@ typedef struct {
     ngx_str_t                 path;
 } ngx_http_mogilefs_src_t;
 
-static ngx_int_t ngx_http_mogilefs_eval_key(ngx_http_request_t *r, ngx_str_t *key);
 static ngx_int_t ngx_http_mogilefs_put_handler(ngx_http_request_t *r);
 static ngx_int_t ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_int_t rc);
 
 static ngx_int_t ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf);
+static ngx_int_t ngx_http_mogilefs_eval_class(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf);
+static ngx_int_t ngx_http_mogilefs_eval_key(ngx_http_request_t *r, ngx_str_t *key);
 static ngx_int_t ngx_http_mogilefs_set_cmd(ngx_http_request_t *r, ngx_http_mogilefs_ctx_t *ctx);
 
 static ngx_int_t ngx_http_mogilefs_create_request(ngx_http_request_t *r);
@@ -95,6 +103,8 @@ static ngx_int_t ngx_http_mogilefs_filter_init(void *data);
 static ngx_int_t ngx_http_mogilefs_filter(void *data, ssize_t bytes);
 
 static ngx_int_t ngx_http_mogilefs_parse_param(ngx_http_request_t *r, ngx_str_t *param);
+static ngx_int_t ngx_http_mogilefs_add_aux_param(ngx_http_request_t *r, ngx_str_t *name,
+    ngx_str_t *value);
 
 static ngx_int_t ngx_http_mogilefs_path_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
@@ -107,6 +117,8 @@ static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
 static char *
 ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *
+ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *
 ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 
 static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
@@ -115,6 +127,7 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
     {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key"), 1},
     {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found"), 0},
     {NGX_HTTP_BAD_REQUEST,              ngx_string("no_key"), 0},
+    {NGX_HTTP_BAD_REQUEST,              ngx_string("unreg_class"), 0},
 
     {NGX_HTTP_INTERNAL_SERVER_ERROR,    ngx_null_string, 0},
 };
@@ -195,6 +208,13 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       offsetof(ngx_http_mogilefs_loc_conf_t, methods),
       &ngx_http_mogilefs_methods_mask },
 
+    { ngx_string("mogilefs_class"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+      ngx_http_mogilefs_class_command,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_mogilefs_loc_conf_t, class_templates),
+      &ngx_http_mogilefs_methods_mask },
+
       ngx_null_command
 };
 
@@ -237,6 +257,7 @@ static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
 }; /* }}} */
 
 static ngx_str_t  ngx_http_mogilefs_path = ngx_string("mogilefs_path");
+static ngx_str_t  ngx_http_mogilefs_class = ngx_string("class");
 
 static ngx_int_t
 ngx_http_mogilefs_handler(ngx_http_request_t *r)
@@ -529,6 +550,47 @@ ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf
 }
 
 static ngx_int_t
+ngx_http_mogilefs_eval_class(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t *mgcf)
+{
+    ngx_uint_t                           i;
+    ngx_http_mogilefs_class_template_t  *t;
+    ngx_str_t                            class;
+
+    if(mgcf->class_templates == NULL) {
+        return NGX_DECLINED;
+    }
+
+    t = mgcf->class_templates->elts;
+
+    for(i = 0;i < mgcf->class_templates->nelts;i++) {
+        if(t->lengths != NULL) {
+            if(ngx_http_script_run(r, &class, t->lengths->elts, 0,
+                                    t->values->elts)
+                == NULL)
+            {
+                return NGX_ERROR;
+            }
+        }
+        else {
+            if(ngx_http_mogilefs_add_aux_param(r, &ngx_http_mogilefs_class, &t->source) != NGX_OK) {
+                return NGX_ERROR;
+            }
+
+            return NGX_OK;
+        }
+
+        if(class.len) {
+            if(ngx_http_mogilefs_add_aux_param(r, &ngx_http_mogilefs_class, &class) != NGX_OK) {
+                return NGX_ERROR;
+            }
+
+            return NGX_OK;
+        }
+    }
+
+    return NGX_DECLINED;
+}
+static ngx_int_t
 ngx_http_mogilefs_eval_key(ngx_http_request_t *r, ngx_str_t *key)
 {
     size_t                          loc_len;
@@ -600,6 +662,7 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_aux_param_t  *a;
     ngx_uint_t                      i;
+    ngx_int_t                       rc;
 
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
@@ -623,6 +686,12 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     else {
         domain.len = mgcf->domain.len;
         domain.data = mgcf->domain.data;
+    }
+
+    rc = ngx_http_mogilefs_eval_class(r, mgcf->parent != NULL ? mgcf->parent : mgcf);
+
+    if(rc == NGX_ERROR) {
+        return rc;
     }
 
     escape_domain = 2 * ngx_escape_uri(NULL, domain.data, domain.len, NGX_ESCAPE_MEMCACHED);
@@ -1173,6 +1242,10 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_bitmask_value(conf->methods, prev->methods,
                          (NGX_CONF_BITMASK_SET|NGX_HTTP_GET));
 
+    if(conf->class_templates == NULL) {
+        conf->class_templates = prev->class_templates;
+    }
+
     return NGX_CONF_OK;
 }
 
@@ -1250,6 +1323,59 @@ ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf
     mgcf->upstream.upstream = ngx_http_upstream_add(cf, &u, 0);
     if (mgcf->upstream.upstream == NULL) {
         return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_mogilefs_loc_conf_t        *mgcf = conf;
+    ngx_http_mogilefs_class_template_t  *t;
+    ngx_str_t                           *value;
+    ngx_uint_t                           i, n;
+    ngx_http_script_compile_t            sc;
+
+    if(mgcf->class_templates == NULL) {
+        mgcf->class_templates = ngx_array_create(cf->pool, cf->args->nelts,
+            sizeof(ngx_http_mogilefs_class_template_t));
+
+        if(mgcf->class_templates == NULL) {
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    value = cf->args->elts;
+
+    for(i = 1;i < cf->args->nelts;i++) {
+        t = ngx_array_push(mgcf->class_templates);
+
+        if(t == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
+        t->source = value[i];
+
+        n = ngx_http_script_variables_count(&t->source);
+
+        if(n) { 
+            ngx_memzero(&sc, sizeof(ngx_http_script_compile_t));
+
+            sc.cf = cf;
+            sc.source = &value[i];
+            sc.lengths = &t->lengths;
+            sc.values = &t->values;
+            sc.variables = n;
+            sc.complete_lengths = 1;
+            sc.complete_values = 1;
+
+            if (ngx_http_script_compile(&sc) != NGX_OK) {
+                return NGX_CONF_ERROR;
+            }
+
+            return NGX_CONF_OK;
+        }
     }
 
     return NGX_CONF_OK;

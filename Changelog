@@ -1,4 +1,7 @@
 
+Version 1.0.3
+ * Added feature: directive mogilefs_class and ability to specify class of a resource
+
 Version 1.0.2
  * Added feature: directive mogilefs_methods and support for PUT and DELETE methods
  * Added feature: dynamic evaluation of tracker name
