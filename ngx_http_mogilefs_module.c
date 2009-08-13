@@ -213,7 +213,7 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
       ngx_http_mogilefs_class_command,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_mogilefs_loc_conf_t, class_templates),
-      &ngx_http_mogilefs_methods_mask },
+      NULL },
 
       ngx_null_command
 };
