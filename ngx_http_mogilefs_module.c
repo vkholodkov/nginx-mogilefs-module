@@ -1373,8 +1373,6 @@ ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             if (ngx_http_script_compile(&sc) != NGX_OK) {
                 return NGX_CONF_ERROR;
             }
-
-            return NGX_CONF_OK;
         }
     }
 
