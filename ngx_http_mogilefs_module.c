@@ -1247,6 +1247,10 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_bitmask_value(conf->methods, prev->methods,
                          (NGX_CONF_BITMASK_SET|NGX_HTTP_GET));
 
+    if(conf->methods & NGX_HTTP_GET) {
+        conf->methods |= NGX_HTTP_HEAD;
+    }
+
     if(conf->class_templates == NULL) {
         conf->class_templates = prev->class_templates;
     }
