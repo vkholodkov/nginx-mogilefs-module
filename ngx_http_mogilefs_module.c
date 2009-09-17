@@ -135,7 +135,7 @@ static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
 
 static ngx_http_mogilefs_cmd_t ngx_http_mogilefs_cmds[] = {
     {NGX_HTTP_GET,                      ngx_string("get_paths"),            ngx_string("path"),         ngx_string("paths") },
-    {NGX_HTTP_HEAD,                     ngx_string("get_paths"),            ngx_string("path_"),        ngx_string("dev_count") },
+    {NGX_HTTP_HEAD,                     ngx_string("get_paths"),            ngx_string("path"),         ngx_string("paths") },
     {NGX_HTTP_PUT,                      ngx_string("create_open"),          ngx_string("path_"),        ngx_string("dev_count") },
     {NGX_HTTP_DELETE,                   ngx_string("delete"),               ngx_null_string,            ngx_null_string },
 
