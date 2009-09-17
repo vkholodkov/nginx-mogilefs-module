@@ -2,6 +2,7 @@
 Version 1.0.3
  * Added feature: directive mogilefs_class and ability to specify class of a resource
  * Change: support for HEAD method
+ * Change: compatiblity with nginx API 0.8.11 and greater
 
 Version 1.0.2
  * Added feature: directive mogilefs_methods and support for PUT and DELETE methods
