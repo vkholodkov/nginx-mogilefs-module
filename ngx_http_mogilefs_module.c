@@ -7,6 +7,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <nginx.h>
 
 typedef enum {
     NGX_MOGILEFS_MAIN,
@@ -354,6 +355,10 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
     if(ngx_http_mogilefs_set_cmd(r, ctx) != NGX_OK) {
         return NGX_ERROR;
     }
+
+#if defined nginx_version && nginx_version >= 8011
+    r->main->count++;
+#endif
 
     ngx_http_upstream_init(r);
 
