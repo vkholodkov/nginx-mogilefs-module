@@ -259,6 +259,7 @@ static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
 
 static ngx_str_t  ngx_http_mogilefs_path = ngx_string("mogilefs_path");
 static ngx_str_t  ngx_http_mogilefs_class = ngx_string("class");
+static ngx_str_t  ngx_http_mogilefs_size = ngx_string("size");
 
 static ngx_int_t
 ngx_http_mogilefs_handler(ngx_http_request_t *r)
@@ -387,7 +388,7 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
     ngx_str_t                           args; 
     ngx_uint_t                          flags;
     ngx_http_request_t                 *sr; 
-    ngx_str_t                           spare_location = ngx_null_string, uri;
+    ngx_str_t                           spare_location = ngx_null_string, uri, value;
     ngx_int_t                           rc;
     u_char                             *p;
     ngx_http_core_loc_conf_t           *clcf;
@@ -503,6 +504,19 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
 
     if(ctx->state == CREATE_CLOSE) {
         ngx_http_set_ctx(sr, ctx->create_open_ctx, ngx_http_mogilefs_module);
+
+        value.data = ngx_palloc(r->pool, NGX_OFF_T_LEN);
+
+        if(value.data == NULL) {
+            return NGX_ERROR;
+        }
+
+        value.len = ngx_sprintf(value.data, "%O", r->headers_in.content_length_n)
+            - value.data;
+
+        if(ngx_http_mogilefs_add_aux_param(sr, &ngx_http_mogilefs_size, &value) != NGX_OK) {
+            return NGX_ERROR;
+        }
     }
 
     sr->method = NGX_HTTP_PUT;
