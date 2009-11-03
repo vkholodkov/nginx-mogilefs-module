@@ -64,6 +64,9 @@ typedef struct {
     ssize_t                   num_paths_returned;
     ngx_array_t              *aux_params;
     ngx_str_t                 key;
+
+    struct sockaddr          *peer_addr;
+    socklen_t                 peer_addr_len;
 } ngx_http_mogilefs_ctx_t;
 
 typedef enum {
@@ -331,6 +334,9 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
+        ctx->peer_addr = NULL;
+        ctx->peer_addr_len = 0;
+
         ctx->num_paths_returned = -1;
         ctx->aux_params = NULL;
 
@@ -547,6 +553,9 @@ ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf
 {
     ngx_str_t             tracker;
     ngx_http_upstream_t  *u;
+    ngx_http_mogilefs_ctx_t *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
 
     if (ngx_http_script_run(r, &tracker, mgcf->tracker_lengths->elts, 0,
                             mgcf->tracker_values->elts)
@@ -562,8 +571,16 @@ ngx_http_mogilefs_eval_tracker(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf
         return NGX_ERROR;
     }
 
-    u->resolved->host = tracker;
-    u->resolved->no_port = 1;
+    if(ctx->peer_addr == NULL) {
+        u->resolved->host = tracker;
+        u->resolved->no_port = 1;
+    }
+    else {
+        u->resolved->sockaddr = ctx->peer_addr;
+        u->resolved->socklen = ctx->peer_addr_len;
+        u->resolved->naddrs = 1;
+        u->resolved->host = tracker;
+    }
 
     return NGX_OK;
 }
@@ -686,6 +703,23 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+
+    /*
+     * Save peer address, so that we contact the same host while doing create_close 
+     */
+    if(mgcf->location_type == NGX_MOGILEFS_CREATE_OPEN && ctx->cmd->method & NGX_HTTP_PUT) {
+        if(r->upstream->peer.sockaddr != NULL) {
+            ctx->peer_addr = ngx_palloc(r->main->pool, r->upstream->peer.socklen);
+
+            if(ctx->peer_addr == NULL) {
+                return NGX_ERROR;
+            }
+
+            ngx_memcpy(ctx->peer_addr, r->upstream->peer.sockaddr, r->upstream->peer.socklen);
+
+            ctx->peer_addr_len = r->upstream->peer.socklen;
+        }
+    }
 
     cmd = ctx->cmd->name;
 
