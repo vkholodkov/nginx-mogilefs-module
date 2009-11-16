@@ -1053,6 +1053,9 @@ ngx_http_mogilefs_add_aux_param(ngx_http_request_t *r, ngx_str_t *name, ngx_str_
     ngx_http_mogilefs_aux_param_t   *p;
     
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+    if(ctx == NULL) {
+        return NGX_ERROR;
+    }
 
     if(ctx->aux_params == NULL) {
         ctx->aux_params = ngx_array_create(r->pool, 3, sizeof(ngx_http_mogilefs_aux_param_t));
