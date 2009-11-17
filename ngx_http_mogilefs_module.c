@@ -64,6 +64,7 @@ typedef struct {
     ssize_t                   num_paths_returned;
     ngx_array_t              *aux_params;
     ngx_str_t                 key;
+    ngx_uint_t                status;
 
     struct sockaddr          *peer_addr;
     socklen_t                 peer_addr_len;
@@ -132,6 +133,7 @@ static ngx_int_t ngx_http_mogilefs_init(ngx_conf_t *cf);
 static ngx_http_mogilefs_error_t ngx_http_mogilefs_errors[] = {
     {NGX_HTTP_NOT_FOUND,                ngx_string("unknown_key"), 1},
     {NGX_HTTP_NOT_FOUND,                ngx_string("domain_not_found"), 0},
+    {NGX_HTTP_SERVICE_UNAVAILABLE,      ngx_string("no_devices"), 0},
     {NGX_HTTP_BAD_REQUEST,              ngx_string("no_key"), 0},
     {NGX_HTTP_BAD_REQUEST,              ngx_string("unreg_class"), 0},
 
@@ -341,6 +343,7 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
 
         ctx->num_paths_returned = -1;
         ctx->aux_params = NULL;
+        ctx->status = 0;
 
         ngx_array_init(&ctx->sources, r->pool, 1, sizeof(ngx_http_mogilefs_src_t));
 
@@ -456,6 +459,16 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
         return NGX_DONE;
     }
 
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "mogilefs put handler state: %ui, status: %ui", ctx->state, ctx->status);
+
+    if(ctx->state == CREATE_OPEN || ctx->state == FETCH || ctx->state == CREATE_CLOSE) {
+        if(ctx->status != NGX_OK && ctx->status != NGX_HTTP_CREATED && ctx->status != NGX_HTTP_NO_CONTENT) {
+            return (ctx->status >= NGX_HTTP_SPECIAL_RESPONSE) ?
+                ctx->status : NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+    }
+
     switch(ctx->state) {
         case START:
             spare_location = mgcf->create_open_spare_location;
@@ -470,13 +483,8 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
             ctx->state = CREATE_CLOSE;
             break;
         case CREATE_CLOSE:
-            if(ctx->status == NGX_OK) {
-                r->headers_out.content_length_n = 0;
-                r->headers_out.status = NGX_HTTP_CREATED;
-            }
-            else {
-                r->headers_out.status = ctx->status;
-            }
+            r->headers_out.content_length_n = 0;
+            r->headers_out.status = NGX_HTTP_CREATED;
 
             r->header_only = 1;
 
@@ -502,7 +510,11 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
     ctx->psr->handler = ngx_http_mogilefs_finish_phase_handler;
     ctx->psr->data = ctx;
 
-    flags |= NGX_HTTP_SUBREQUEST_IN_MEMORY|NGX_HTTP_SUBREQUEST_WAITED;
+    flags |= NGX_HTTP_SUBREQUEST_WAITED;
+
+    if(ctx->state == FETCH) {
+        flags |= NGX_HTTP_SUBREQUEST_IN_MEMORY;
+    }
 
     rc = ngx_http_subrequest(r, &uri, &args, &sr, ctx->psr, flags);
 
@@ -540,14 +552,21 @@ static ngx_int_t
 ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_int_t rc)
 {
     ngx_http_mogilefs_put_ctx_t *ctx = data;
+    ngx_http_mogilefs_ctx_t     *subrequest_ctx;
 
-    if(rc == NGX_OK && ctx->state == CREATE_OPEN) {
-        ctx->create_open_ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+    subrequest_ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);   
+
+    if(ctx->state == CREATE_OPEN) {
+        ctx->create_open_ctx = subrequest_ctx;
     }
 
-    ctx->status = rc;
+    ctx->status = (subrequest_ctx != NULL && subrequest_ctx->status >= NGX_HTTP_SPECIAL_RESPONSE)
+        ? subrequest_ctx->status : rc;
 
-    return rc;
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "mogilefs finish phase handler: state=%ui, status=%ui", ctx->state, ctx->status);
+
+    return NGX_OK;
 }
 
 static ngx_int_t
@@ -1056,6 +1075,7 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
     r->headers_out.content_length_n = 0;
     u->headers_in.status_n = e->status;
     u->state->status = e->status;
+    ctx->status = e->status;
 
     // Return no content
     u->buffer.pos = u->buffer.pos;
