@@ -82,6 +82,8 @@ typedef struct {
     ngx_uint_t                       status;
     ngx_http_mogilefs_ctx_t         *create_open_ctx;
     ngx_str_t                        key;
+
+    ngx_uint_t                       num_successful_stores;
 } ngx_http_mogilefs_put_ctx_t;
 
 typedef struct {
@@ -942,7 +944,24 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     mgcf = ngx_http_get_module_loc_conf(r, ngx_http_mogilefs_module);
 
     source = ctx->sources.elts;
-    
+
+    /*
+     * Save peer address, so that we contact the same host while doing create_close 
+     */
+    if(mgcf->location_type == NGX_MOGILEFS_CREATE_OPEN && ctx->cmd->method & NGX_HTTP_PUT) {
+        if(r->upstream->peer.sockaddr != NULL) {
+            ctx->peer_addr = ngx_palloc(r->main->pool, r->upstream->peer.socklen);
+
+            if(ctx->peer_addr == NULL) {
+                return NGX_ERROR;
+            }
+
+            ngx_memcpy(ctx->peer_addr, r->upstream->peer.sockaddr, r->upstream->peer.socklen);
+
+            ctx->peer_addr_len = r->upstream->peer.socklen;
+        }
+    }
+
     /*
      * Set $mogilefs_path variable
      */
@@ -1051,6 +1070,9 @@ ngx_http_mogilefs_add_aux_param(ngx_http_request_t *r, ngx_str_t *name, ngx_str_
     ngx_http_mogilefs_aux_param_t   *p;
     
     ctx = ngx_http_get_module_ctx(r, ngx_http_mogilefs_module);
+    if(ctx == NULL) {
+        return NGX_ERROR;
+    }
 
     if(ctx->aux_params == NULL) {
         ctx->aux_params = ngx_array_create(r->pool, 3, sizeof(ngx_http_mogilefs_aux_param_t));
