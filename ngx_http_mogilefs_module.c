@@ -539,6 +539,23 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
         }
     }
 
+    /*
+     * Nginx closes temporary file with buffered body
+     * whenever it starts sending reponse from upstream
+     * and it is not doing subrequest in memory.
+     *
+     * Since the request body in create_open subrequest is
+     * inherited from main request, it is necessary to prevent
+     * nginx from closing the temporary file with request body,
+     * before it could be passed to the storage node on fetch/store
+     * stage.
+     *
+     * We do it by "hiding" the request body from nginx internals.
+     */
+    if(ctx->state == CREATE_OPEN) {
+        sr->request_body = NULL;
+    }
+
     sr->method = NGX_HTTP_PUT;
     sr->method_name = ngx_http_mogilefs_put_method;
 
