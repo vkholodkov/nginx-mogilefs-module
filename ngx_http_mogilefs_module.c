@@ -580,7 +580,7 @@ ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_in
     ctx->status = (subrequest_ctx != NULL && subrequest_ctx->status >= NGX_HTTP_SPECIAL_RESPONSE)
         ? subrequest_ctx->status : rc;
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs finish phase handler: state=%ui, status=%ui", ctx->state, ctx->status);
 
     return NGX_OK;
