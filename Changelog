@@ -5,6 +5,7 @@ Version 1.0.3
  * Change: compatiblity with nginx API 0.8.11 and greater
  * Change: size parameter is now sent with create_close command
  * Fixed bug: create_open command and create_close command now cannot be sent to different trackers
+ * Change: imporved error handling
 
 Version 1.0.2
  * Added feature: directive mogilefs_methods and support for PUT and DELETE methods
