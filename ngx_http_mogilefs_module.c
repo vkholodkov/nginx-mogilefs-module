@@ -64,7 +64,7 @@ typedef struct {
     ssize_t                   num_paths_returned;
     ngx_array_t              *aux_params;
     ngx_str_t                 key;
-    ngx_uint_t                status;
+    ngx_int_t                 status;
 
     struct sockaddr          *peer_addr;
     socklen_t                 peer_addr_len;
@@ -80,7 +80,7 @@ typedef enum {
 typedef struct {
     ngx_http_post_subrequest_t      *psr;
     ngx_http_mogilefs_put_state_t    state;
-    ngx_uint_t                       status;
+    ngx_int_t                        status;
     ngx_http_mogilefs_ctx_t         *create_open_ctx;
     ngx_str_t                        key;
 
@@ -460,7 +460,7 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
     }
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "mogilefs put handler state: %ui, status: %ui", ctx->state, ctx->status);
+                   "mogilefs put handler state: %ui, status: %i", ctx->state, ctx->status);
 
     if(ctx->state == CREATE_OPEN || ctx->state == FETCH || ctx->state == CREATE_CLOSE) {
         if(ctx->status != NGX_OK && ctx->status != NGX_HTTP_CREATED && ctx->status != NGX_HTTP_NO_CONTENT) {
@@ -581,7 +581,7 @@ ngx_http_mogilefs_finish_phase_handler(ngx_http_request_t *r, void *data, ngx_in
         ? subrequest_ctx->status : rc;
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "mogilefs finish phase handler: state=%ui, status=%ui", ctx->state, ctx->status);
+                   "mogilefs finish phase handler: state=%ui, status=%i", ctx->state, ctx->status);
 
     return NGX_OK;
 }
