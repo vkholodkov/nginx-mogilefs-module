@@ -9,6 +9,12 @@
 #include <ngx_http.h>
 #include <nginx.h>
 
+/*
+ * NOTE: Once you change the value of this macro to >10,
+ * you need to do adapt the code accordingly
+ */
+#define NGX_MOGILEFS_MAX_PATHS  10
+
 typedef enum {
     NGX_MOGILEFS_MAIN,
     NGX_MOGILEFS_CREATE_OPEN,
@@ -41,7 +47,7 @@ typedef struct ngx_http_mogilefs_loc_conf_s {
     ngx_str_t                  key;
     ngx_array_t                *key_lengths;
     ngx_array_t                *key_values;
-    ngx_int_t                  index;
+    ngx_int_t                  index[NGX_MOGILEFS_MAX_PATHS];
     ngx_http_upstream_conf_t   upstream;
     ngx_array_t                *tracker_lengths;
     ngx_array_t                *tracker_values;
@@ -255,16 +261,13 @@ ngx_module_t  ngx_http_mogilefs_module = {
     NGX_MODULE_V1_PADDING
 };
 
-static ngx_http_variable_t  ngx_http_mogilefs_variables[] = { /* {{{ */
-
-    { ngx_string("mogilefs_path"), NULL, ngx_http_mogilefs_path_variable,
+static ngx_http_variable_t  ngx_http_mogilefs_path_variable_template = { /* {{{ */
+    ngx_string("mogilefs_path#"), NULL, ngx_http_mogilefs_path_variable,
       (uintptr_t) offsetof(ngx_http_mogilefs_ctx_t, sources),
-      NGX_HTTP_VAR_CHANGEABLE, 0 },
-
-    { ngx_null_string, NULL, NULL, 0, 0, 0 }
+      NGX_HTTP_VAR_CHANGEABLE, 0
 }; /* }}} */
 
-static ngx_str_t  ngx_http_mogilefs_path = ngx_string("mogilefs_path");
+static ngx_str_t  ngx_http_mogilefs_path = ngx_string("mogilefs_path#");
 static ngx_str_t  ngx_http_mogilefs_class = ngx_string("class");
 static ngx_str_t  ngx_http_mogilefs_size = ngx_string("size");
 
@@ -902,6 +905,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     ngx_http_variable_value_t      *v;
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_src_t        *source;
+    ngx_uint_t                     i;
 
     line->data += sizeof("OK ") - 1;
     line->len -= sizeof("OK ") - 1;
@@ -999,16 +1003,18 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     }
 
     /*
-     * Set $mogilefs_path variable
+     * Set $mogilefs_path variables
      */
-    v = r->variables + mgcf->index;
+    for(i=0;i < ctx->sources.nelts;i++) {
+        v = r->variables + mgcf->index[i];
 
-    v->data = source->path.data;
-    v->len = source->path.len;
+        v->data = source[i].path.data;
+        v->len = source[i].path.len;
 
-    v->not_found = 0;
-    v->no_cacheable = 0;
-    v->valid = 1;
+        v->not_found = 0;
+        v->no_cacheable = 0;
+        v->valid = 1;
+    }
 
     /*
      * Redirect to fetch location
@@ -1367,10 +1373,26 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
 static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf)
 {
+    ngx_uint_t           i;
     ngx_http_variable_t  *var, *v;
+    ngx_str_t            name;
 
-    for (v = ngx_http_mogilefs_variables; v->name.len; v++) {
-        var = ngx_http_add_variable(cf, &v->name, v->flags);
+    /*
+     * Add 10 instances of mogilefs_path variable with
+     * different names
+     */
+    v = &ngx_http_mogilefs_path_variable_template;
+
+    for(i=0;i<NGX_MOGILEFS_MAX_PATHS;i++) {
+        name.data = v->name.data;
+        name.len = v->name.len - 1;
+
+        if(i > 0) {
+            name.data[name.len] = '0' + i;
+            name.len++;
+        }
+
+        var = ngx_http_add_variable(cf, &name, v->flags);
         if (var == NULL) {
             return NGX_ERROR;
         }
@@ -1562,7 +1584,7 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
 
         ngx_memcpy(&mgcf->upstream, &pmgcf->upstream, sizeof(ngx_http_upstream_conf_t));
 
-        mgcf->index = pmgcf->index;
+        ngx_memcpy(mgcf->index, pmgcf->index, NGX_MOGILEFS_MAX_PATHS * sizeof(ngx_int_t));
 
         clcf->handler = ngx_http_mogilefs_handler;
     }
@@ -1609,8 +1631,9 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                 *value;
     ngx_conf_t                 save;
     ngx_http_script_compile_t  sc;
-    ngx_uint_t                 n;
+    ngx_uint_t                 n, i;
     char                      *rc;
+    ngx_str_t                  name;
 
     if (pmgcf->fetch_location.len != 0) {
         return "is duplicate";
@@ -1620,10 +1643,20 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "no tracker defined";
     }
 
-    pmgcf->index = ngx_http_get_variable_index(cf, &ngx_http_mogilefs_path);
+    for(i=0;i < NGX_MOGILEFS_MAX_PATHS;i++) {
+        name.data = ngx_http_mogilefs_path.data;
+        name.len = ngx_http_mogilefs_path.len - 1;
 
-    if (pmgcf->index == NGX_ERROR) {
-        return NGX_CONF_ERROR;
+        if(i > 0) {
+            name.data[name.len] = '0' + i;
+            name.len++;
+        }
+
+        pmgcf->index[i] = ngx_http_get_variable_index(cf, &name);
+
+        if (pmgcf->index[i] == NGX_ERROR) {
+            return NGX_CONF_ERROR;
+        }
     }
 
     rc = ngx_http_mogilefs_create_spare_location(cf, NULL, &pmgcf->create_open_spare_location,
