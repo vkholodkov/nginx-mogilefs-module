@@ -261,14 +261,14 @@ ngx_module_t  ngx_http_mogilefs_module = {
     NGX_MODULE_V1_PADDING
 };
 
+static u_char     ngx_http_mogilefs_path_str[] = "mogilefs_path#";
+static ngx_str_t  ngx_http_mogilefs_path = ngx_string(ngx_http_mogilefs_path_str);
+
 static ngx_http_variable_t  ngx_http_mogilefs_path_variable_template = { /* {{{ */
-    ngx_string("mogilefs_path#"), NULL, ngx_http_mogilefs_path_variable,
+    ngx_string(ngx_http_mogilefs_path_str), NULL, ngx_http_mogilefs_path_variable,
       (uintptr_t) offsetof(ngx_http_mogilefs_ctx_t, sources),
       NGX_HTTP_VAR_CHANGEABLE, 0
 }; /* }}} */
-
-static u_char     ngx_http_mogilefs_path_str[] = "mogilefs_path#";
-static ngx_str_t  ngx_http_mogilefs_path = ngx_string(ngx_http_mogilefs_path_str);
 static ngx_str_t  ngx_http_mogilefs_class = ngx_string("class");
 static ngx_str_t  ngx_http_mogilefs_size = ngx_string("size");
 
