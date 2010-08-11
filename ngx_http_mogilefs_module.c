@@ -267,7 +267,7 @@ static ngx_http_variable_t  ngx_http_mogilefs_path_variable_template = { /* {{{ 
       NGX_HTTP_VAR_CHANGEABLE, 0
 }; /* }}} */
 
-static char       ngx_http_mogilefs_path_str[] = "mogilefs_path#";
+static u_char     ngx_http_mogilefs_path_str[] = "mogilefs_path#";
 static ngx_str_t  ngx_http_mogilefs_path = ngx_string(ngx_http_mogilefs_path_str);
 static ngx_str_t  ngx_http_mogilefs_class = ngx_string("class");
 static ngx_str_t  ngx_http_mogilefs_size = ngx_string("size");
