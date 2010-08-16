@@ -641,7 +641,7 @@ ngx_http_mogilefs_eval_class(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t
     t = mgcf->class_templates->elts;
 
     for(i = 0;i < mgcf->class_templates->nelts;i++) {
-        if(t->lengths != NULL) {
+        if(t->lengths != NULL && t->values != NULL) {
             if(ngx_http_script_run(r, &class, t->lengths->elts, 0,
                                     t->values->elts)
                 == NULL)
@@ -1495,6 +1495,8 @@ ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
 
         t->source = value[i];
+        t->lengths = NULL;
+        t->values = NULL;
 
         n = ngx_http_script_variables_count(&t->source);
 
