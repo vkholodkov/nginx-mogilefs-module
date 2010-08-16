@@ -1,4 +1,9 @@
 
+Version 1.0.4
+ * Added feature: multiple $mogilefs_path variables
+ * Fixed bug: segfault on reconfiguration due to uninitialized class template (thanks to Pyry Hakulinen)
+ * Fixed bug: segfault due to modification of a constant string (thanks to Akzhan Abdulin)
+
 Version 1.0.3
  * Added feature: directive mogilefs_class and ability to specify class of a resource
  * Change: support for HEAD method
