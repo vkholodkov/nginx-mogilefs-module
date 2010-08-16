@@ -298,8 +298,6 @@ ngx_http_mogilefs_handler(ngx_http_request_t *r)
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
 
-            /* fall through */
-
         case NGX_HTTP_DELETE:
             rc = ngx_http_discard_request_body(r);
 
