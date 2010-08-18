@@ -1020,7 +1020,7 @@ ngx_http_mogilefs_process_ok_response(ngx_http_request_t *r,
     /*
      * Redirect to fetch location
      */
-    if (ctx->cmd->method & NGX_HTTP_GET && r->upstream->headers_in.x_accel_redirect == NULL) {
+    if (ctx->cmd->method & (NGX_HTTP_GET|NGX_HTTP_HEAD) && r->upstream->headers_in.x_accel_redirect == NULL) {
 
         umcf = ngx_http_get_module_main_conf(r, ngx_http_upstream_module);
 
