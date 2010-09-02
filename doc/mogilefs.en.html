@@ -3,13 +3,13 @@
 -->
 <html>
 	<head>
-		<title>Nginx mogilefs module (v 1.0.2)</title>
+		<title>Nginx mogilefs module (v 1.0.3)</title>
 	</head>
 	<body>
         <table align="center" width="100%">
             <tr>
                 <td align="left">
-                    <h2>Nginx mogilefs module (v 1.0.2)</h2>
+                    <h2>Nginx mogilefs module (v 1.0.3)</h2>
                 </td>
                 <td align="right">
                     <a href="mogilefs.ru.html">rus</a> eng
@@ -18,7 +18,7 @@
         </table>
 		<p>MogileFS client for <a href="http://www.nginx.ru/">nginx</a> web server.</p>
 		<h2>Description</h2>
-		<p>The module queries MogileFS tracker specified by <a href="#mogilefs_tracker">mogilefs_tracker</a> directive and uses first path returned by tracker to fetch requested file. The file key is specified by <a href="#mogilefs_pass">mogilefs_pass</a> directive. If no domain or no file with specified key is found by tracker "404 Not found" status is retuned. If file is found but zero paths are returned by tracker "403 Service unavailable" status is retuned.</p>
+		<p>The module queries MogileFS tracker specified by <a href="#mogilefs_tracker">mogilefs_tracker</a> directive and uses first path returned by tracker to fetch requested file. The file key is specified by <a href="#mogilefs_pass">mogilefs_pass</a> directive. If no domain or no file with specified key is found by tracker "404 Not found" status is retuned. If file is found but zero paths are returned by tracker "503 Service unavailable" status is retuned. If tracker has returned successful response the modules tries to fetch file using path with the greatest priority.</p>
         <a name="directives"></a><h2>Configuration directives</h2><hr>
 		<a name="mogilefs_pass"></a><strong>syntax: </strong>mogilefs_pass <strong><em>[&lt;key&gt;] {&lt;fetch block&gt;}</em></strong><br><strong>default: </strong>none<br><strong>severity: </strong>mandatory<br><strong>context: </strong>server, location, limit_except<br><p>Specifies key of the file to query from MogileFS tracker. The key can contain any variables. If key is omitted, the part of request URI will be uses as key, which remains after stripping the name of mathced location.</p>
 		<pre>
@@ -41,6 +41,7 @@
 		<hr>
 		<a name="mogilefs_methods"></a><strong>syntax: </strong>mogilefs_methods <strong><em>&lt;[[method 1] method 2 ... ]&gt;</em></strong><br><strong>default: </strong>GET<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies which methods will be allowed to access MogileFS. GET retrieves a resource from MogileFS, PUT creates or replaces, DELETE deletes a resource in MogileFS.</p><hr>
 		<a name="mogilefs_domain"></a><strong>syntax: </strong>mogilefs_domain <strong><em>&lt;domain&gt;</em></strong><br><strong>default: </strong>default<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies the name of MogileFS domain to query. The specification may contain variables.</p><hr>
+		<a name="mogilefs_class"></a><strong>syntax: </strong>mogilefs_class <strong><em>&lt;class0&gt; [ &lt;class1&gt; [ ... ] ]</em></strong><br><strong>default: </strong>N/A<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>This directive specifies what to use as &quot;class&quot; parameter when making a request to tracker. The arguments of this directives will be evaluated and first non-empty value will be used as class. Arguments can contain variables.</p><hr>
 		<a name="mogilefs_tracker"></a><strong>syntax: </strong>mogilefs_tracker <strong><em>&lt;IP|IP:port|upstream&gt;</em></strong><br><strong>default: </strong>none<br><strong>severity: </strong>mandatory<br><strong>context: </strong>main, server, location<br><p>Specifies address of MogileFS tracker to query.</p><hr>
 		<a name="mogilefs_noverify"></a><strong>syntax: </strong>mogilefs_noverify <strong><em>&lt;on/off&gt;</em></strong><br><strong>default: </strong>off<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Enables sending of <i>noverify</i> argument to MogileFS.</p><hr>
 		<a name="mogilefs_connect_timeout"></a><strong>syntax: </strong>mogilefs_connect_timeout <strong><em>&lt;time&gt;</em></strong><br><strong>default: </strong>60s<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies a timeout to be used to connect to mogilefs tracker.  Could not be longer than 75 seconds.</p><hr>
@@ -59,12 +60,36 @@ http {
     server {
         listen       80;
 
+        #
+        # This location could be used to retrieve files from MogileFS.
+        # It is publicly available.
+        #
         location /download/ {
             #
             # Query tracker at 192.168.2.2 for a file with the key
             # equal to remaining part of request URI
             #
             mogilefs_tracker 192.168.2.2;
+            mogilefs_domain example_domain;
+
+            mogilefs_pass {
+                proxy_pass $mogilefs_path;
+                proxy_hide_header Content-Type;
+                proxy_buffering off;
+            }
+        }
+
+        #
+        # This location could be used to store or delete files in MogileFS.
+        # It may be configured to be accessable only from local network.
+        #
+        location /upload/ {
+            allow 192.168.2.0/24;
+            deny all;
+
+            mogilefs_tracker 192.168.2.2;
+            mogilefs_domain example_domain;
+            mogilefs_methods PUT DELETE;
 
             mogilefs_pass {
                 proxy_pass $mogilefs_path;
@@ -78,16 +103,16 @@ http {
 		<a name="requirements"><h2>Requirements</h2>
 		<p>nginx 0.7.1 or above is required to compile this module.</p>
 		<a name="download"><h2>Download</h2>
-		<p>Latest version 1.0.2: <br/>
+		<p>Latest version 1.0.3: <br/>
         <table border="1">
             <tr>
                 <td>File</td><td>MD5</td><td>SHA1</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.tar.gz">nginx_mogilefs_module-1.0.2.tar.gz</a></td><td>62a72ce32d10b7811a18b672d8f69e17</td><td>3233d553586c534e81767c3c330ebc1e04bc8bf5</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.3.tar.gz">nginx_mogilefs_module-1.0.3.tar.gz</a></td><td>e3c1b9f4ceb26d7573af5acfda59e9a8</td><td>d17d36b3f1ee4902379aaccc3bf993fec89911a0</td>
             </tr>
             <tr>
-                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.2.zip">nginx_mogilefs_module-1.0.2.zip</a></td><td>f0caf3601265a6505d555ab76cac0cfa</td><td>c645e04fb07225e0c63f765a61e9e322c3826f73</td>
+                <td><a href="http://www.grid.net.ru/nginx/download/nginx_mogilefs_module-1.0.3.zip">nginx_mogilefs_module-1.0.3.zip</a></td><td>3ea34b9d99c3cb8cf1a733642ab2d966</td><td>65566dc205f05c7d3f8414163b09108187539244</td>
             </tr>
         </table>
         or go to <a href="download">download area</a>
@@ -97,7 +122,7 @@ http {
 		<a name="usage"><h2>How to use</h2>
 		<p>Download sources from one of the links above. Unpack the archive: </p>
 		<pre>
-tar xvzf nginx_mogilefs_module-1.0.2.tar.gz</pre>
+tar xvzf nginx_mogilefs_module-1.0.3.tar.gz</pre>
 		<p>Configure nginx with additional module: </p>
 		<pre>
 cd &lt;path to nginx sources&gt;
@@ -107,7 +132,7 @@ make install</pre>
 		<h2>Nginx</h2>
 		<p><a href="http://www.nginx.ru">nginx</a> -- is a web-server, developed by Igor Sysoev.</p>
 		<h2>Licence</h2>
-		<p>The licence of above-described module is <a href="http://en.wikipedia.org/wiki/BSD_license">BSD</a> You should have received a copy of licence along with the source code.</p>
+		<p>The above-described module is an addition to <a href="http://www.nginx.ru">nginx</a> web-server, nevertheless they are independent products. The licence of above-described module is <a href="http://en.wikipedia.org/wiki/BSD_license">BSD</a> You should have received a copy of license along with the source code. By using the materials from this site you automatically agree to the terms and conditions of this license. If you don't agree to the terms and conditions of this license, you must immediately remove from your computer all materials downloaded from this site.</p>
 		<h2>Contact author</h2>
 		<p>Valery Kholodkov <a href="mailto:valery+nginx@grid.net.ru">valery+nginx@grid.net.ru</a><br>Please use address extension while composing an Email to me.</p>
         <hr>
