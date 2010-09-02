@@ -38,6 +38,7 @@
             }
         </pre>
         <p>The variable $mogilefs_path contains absolute URL to the file on storage node. The fetch block creates a hidden internal location with the name /mogilefs_fetch_XXXXXXXX, where redirected will be performed after successful tracker response.</p>
+        <p>The variables $mogilefs_path1 .. $mogilefs_path9 contain backup URLs of the file on storage nodes.</p>
 		<hr>
 		<a name="mogilefs_methods"></a><strong>syntax: </strong>mogilefs_methods <strong><em>&lt;[[method 1] method 2 ... ]&gt;</em></strong><br><strong>default: </strong>GET<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies which methods will be allowed to access MogileFS. GET retrieves a resource from MogileFS, PUT creates or replaces, DELETE deletes a resource in MogileFS.</p><hr>
 		<a name="mogilefs_domain"></a><strong>syntax: </strong>mogilefs_domain <strong><em>&lt;domain&gt;</em></strong><br><strong>default: </strong>default<br><strong>severity: </strong>optional<br><strong>context: </strong>main, server, location<br><p>Specifies the name of MogileFS domain to query. The specification may contain variables.</p><hr>
