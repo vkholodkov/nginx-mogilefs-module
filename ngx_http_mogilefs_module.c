@@ -662,6 +662,8 @@ ngx_http_mogilefs_eval_class(ngx_http_request_t *r, ngx_http_mogilefs_loc_conf_t
 
             return NGX_OK;
         }
+
+        t++;
     }
 
     return NGX_DECLINED;
