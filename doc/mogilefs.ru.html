@@ -38,7 +38,7 @@
             }
         </pre>
         <p>Переменная $mogilefs_path содержит абсолютный URL к файлу на узле хранения. Блок выборки создает скрытый внутренний location с именем /mogilefs_fetch_XXXXXXXX, на который выполняется перенаправление после успешного ответа трэкера.</p>
-        <p>Переменные $mogilefs_path1 .. $mogilefs_path9 содержат запасные URL на узлах хранения.</p>
+        <p>Переменные $mogilefs_path1 .. $mogilefs_path9 содержат запасные URL файла на узлах хранения.</p>
 		<hr>
 		<a name="mogilefs_domain"></a><strong>синтаксис: </strong>mogilefs_domain <strong><em>&lt;домен&gt;</em></strong><br><strong>значение по-умолчанию: </strong>default<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает домен MogileFS который будет запрошен у трэкера.</p><hr>
 		<a name="mogilefs_class"></a><strong>синтаксис: </strong>mogilefs_class <strong><em>&lt;класс0&gt; [ &lt;класс1&gt; [ ... ] ]</em></strong><br><strong>значение по-умолчанию: </strong>нет<br><strong>строгость: </strong>необязательная<br><strong>контекст: </strong>main, server, location<br><p>Задает класс ресурса MogileFS который будет запрошен у трэкера. nginx вычисляет значения аргументов этой директивы и использует первое непустое значение в качестве класса.</p><hr>
