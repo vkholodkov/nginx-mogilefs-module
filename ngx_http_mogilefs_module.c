@@ -1067,6 +1067,7 @@ ngx_http_mogilefs_process_error_response(ngx_http_request_t *r,
 
     line->data += sizeof("ERR ") - 1;
     line->len -= sizeof("ERR ") - 1;
+	line->len -= 1; /* strip \r */
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                   "mogilefs error: \"%V\"", line);
