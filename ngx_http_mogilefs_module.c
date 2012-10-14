@@ -486,6 +486,9 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
 #endif
             spare_location = mgcf->create_close_spare_location;
             ctx->state = CREATE_CLOSE;
+#if defined nginx_version && nginx_version >= 8011
+            r->main->count++;
+#endif
             break;
         case CREATE_CLOSE:
 #if defined nginx_version && nginx_version >= 8011
