@@ -481,10 +481,16 @@ ngx_http_mogilefs_put_handler(ngx_http_request_t *r)
             ctx->state = FETCH;
             break;
         case FETCH:
+#if defined nginx_version && nginx_version >= 8011
+            r->main->count++;
+#endif
             spare_location = mgcf->create_close_spare_location;
             ctx->state = CREATE_CLOSE;
             break;
         case CREATE_CLOSE:
+#if defined nginx_version && nginx_version >= 8011
+            r->main->count++;
+#endif
             r->headers_out.content_length_n = 0;
             r->headers_out.status = NGX_HTTP_CREATED;
 
