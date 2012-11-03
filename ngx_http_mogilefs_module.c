@@ -744,7 +744,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
-    ngx_str_t                       request, domain;
+#if NGX_DEBUG
+    ngx_str_t                       request;
+#endif
+    ngx_str_t                       domain;
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_aux_param_t  *a;
     ngx_uint_t                      i;
@@ -868,11 +871,13 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         }
     }
 
+#if NGX_DEBUG
     request.data = b->pos;
     request.len = b->last - b->pos;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs request: \"%V\"", &request);
+#endif
 
     *b->last++ = CR; *b->last++ = LF;
 
@@ -1572,7 +1577,7 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
     ngx_uint_t                 i;
     ngx_http_module_t         *module;
     void                      *mconf;
-    ngx_http_core_loc_conf_t  *clcf, *pclcf, *rclcf;
+    ngx_http_core_loc_conf_t  *clcf, *rclcf;
     ngx_http_core_srv_conf_t  *cscf;
 
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_conf_ctx_t));
@@ -1606,8 +1611,6 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
             ctx->loc_conf[ngx_modules[i]->ctx_index] = mconf;
         }
     }
-
-    pclcf = pctx->loc_conf[ngx_http_core_module.ctx_index];
 
     clcf = ctx->loc_conf[ngx_http_core_module.ctx_index];
 
