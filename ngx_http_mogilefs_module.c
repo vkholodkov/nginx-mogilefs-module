@@ -51,7 +51,7 @@ typedef struct ngx_http_mogilefs_loc_conf_s {
     ngx_http_upstream_conf_t   upstream;
     ngx_array_t                *tracker_lengths;
     ngx_array_t                *tracker_values;
-    ngx_str_t                  domain;
+    ngx_http_complex_value_t   *domain_complex;
     ngx_array_t                *class_templates;
     ngx_str_t                  fetch_location;
     ngx_flag_t                 noverify;
@@ -130,6 +130,8 @@ static ngx_int_t ngx_http_mogilefs_add_variables(ngx_conf_t *cf);
 static char *
 ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *
+ngx_http_mogilefs_domain_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+static char *
 ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 static char *
 ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
@@ -182,9 +184,9 @@ static ngx_command_t  ngx_http_mogilefs_commands[] = {
 
     { ngx_string("mogilefs_domain"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_str_slot,
+      ngx_http_mogilefs_domain_command,
       NGX_HTTP_LOC_CONF_OFFSET,
-      offsetof(ngx_http_mogilefs_loc_conf_t, domain),
+      offsetof(ngx_http_mogilefs_loc_conf_t, domain_complex),
       NULL },
 
     { ngx_string("mogilefs_connect_timeout"),
@@ -745,7 +747,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
     ngx_buf_t                      *b;
     ngx_chain_t                    *cl;
     ngx_http_mogilefs_loc_conf_t   *mgcf;
-    ngx_str_t                       request, domain;
+#if NGX_DEBUG
+    ngx_str_t                       request;
+#endif
+    ngx_str_t                       domain;
     ngx_http_mogilefs_ctx_t        *ctx;
     ngx_http_mogilefs_aux_param_t  *a;
     ngx_uint_t                      i;
@@ -783,13 +788,10 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         return NGX_HTTP_BAD_REQUEST;
     }
 
-    if(mgcf->parent != NULL) {
-        domain.len = mgcf->parent->domain.len;
-        domain.data = mgcf->parent->domain.data;
-    }
-    else {
-        domain.len = mgcf->domain.len;
-        domain.data = mgcf->domain.data;
+    rc = ngx_http_complex_value(r, mgcf->parent != NULL ? mgcf->parent->domain_complex : mgcf->domain_complex, &domain);
+
+    if(rc == NGX_ERROR) {
+        return rc;
     }
 
     rc = ngx_http_mogilefs_eval_class(r, mgcf->parent != NULL ? mgcf->parent : mgcf);
@@ -872,11 +874,13 @@ ngx_http_mogilefs_create_request(ngx_http_request_t *r)
         }
     }
 
+#if NGX_DEBUG
     request.data = b->pos;
     request.len = b->last - b->pos;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "mogilefs request: \"%V\"", &request);
+#endif
 
     *b->last++ = CR; *b->last++ = LF;
 
@@ -1363,7 +1367,9 @@ ngx_http_mogilefs_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->upstream.upstream = prev->upstream.upstream;
     }
 
-    ngx_conf_merge_str_value(conf->domain, prev->domain, "default");
+    if (conf->domain_complex == NULL) {
+        conf->domain_complex = prev->domain_complex;
+    }
 
     ngx_conf_merge_value(conf->noverify, prev->noverify, 0);
 
@@ -1477,6 +1483,42 @@ ngx_http_mogilefs_tracker_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf
 }
 
 static char *
+ngx_http_mogilefs_domain_command(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    char  *p = conf;
+
+    ngx_str_t                          *value;
+    ngx_http_complex_value_t          **cv;
+    ngx_http_compile_complex_value_t    ccv;
+
+    cv = (ngx_http_complex_value_t **) (p + cmd->offset);
+
+    if (*cv != NULL) {
+        return "duplicate";
+    }
+
+    *cv = ngx_palloc(cf->pool, sizeof(ngx_http_complex_value_t));
+    if (*cv == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    value = cf->args->elts;
+
+    ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
+
+    ccv.cf = cf;
+    ccv.value = &value[1];
+    ccv.complex_value = *cv;
+
+    if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
+static char *
 ngx_http_mogilefs_class_command(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_mogilefs_loc_conf_t        *mgcf = conf;
@@ -1538,7 +1580,7 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
     ngx_uint_t                 i;
     ngx_http_module_t         *module;
     void                      *mconf;
-    ngx_http_core_loc_conf_t  *clcf, *pclcf, *rclcf;
+    ngx_http_core_loc_conf_t  *clcf, *rclcf;
     ngx_http_core_srv_conf_t  *cscf;
 
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_conf_ctx_t));
@@ -1572,8 +1614,6 @@ ngx_http_mogilefs_create_spare_location(ngx_conf_t *cf, ngx_http_conf_ctx_t **oc
             ctx->loc_conf[ngx_modules[i]->ctx_index] = mconf;
         }
     }
-
-    pclcf = pctx->loc_conf[ngx_http_core_module.ctx_index];
 
     clcf = ctx->loc_conf[ngx_http_core_module.ctx_index];
 
@@ -1653,6 +1693,10 @@ ngx_http_mogilefs_pass_block(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     if (pmgcf->upstream.upstream == 0 && pmgcf->tracker_lengths == NULL) {
         return "no tracker defined";
+    }
+
+    if (pmgcf->domain_complex == NULL) {
+        return "no domain defined";
     }
 
     for(i=0;i < NGX_MOGILEFS_MAX_PATHS;i++) {
